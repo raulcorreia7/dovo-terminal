@@ -8,17 +8,17 @@ import {
   type OverlayHandle,
   type Terminal,
 } from "@earendil-works/pi-tui";
-import type { RuntimeClient } from "#client/runtime-client.ts";
-import type { SyncFrame, TaskEvent, Unsubscribe } from "#protocol/sync.ts";
+import type { RuntimeClient } from "../client/runtime-client.ts";
+import type { SyncFrame, TaskEvent, Unsubscribe } from "../protocol/sync.ts";
 import type {
   AgentProvider,
   Project,
   TaskSummary,
-} from "#protocol/workspace.ts";
+} from "../protocol/workspace.ts";
 import { HelpView } from "./help.ts";
 import { LineText } from "./line.ts";
 import { colors, t } from "./theme.ts";
-import type { Screen } from "#tui/screen.ts";
+import type { Screen } from "./screen.ts";
 
 export class App {
   readonly tui: TuiAltScreen;

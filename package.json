@@ -9,14 +9,6 @@
   "files": [
     "src"
   ],
-  "imports": {
-    "#protocol/*": "./src/protocol/*",
-    "#client/*": "./src/client/*",
-    "#server/*": "./src/server/*",
-    "#demo/*": "./src/demo/*",
-    "#tui/*": "./src/tui/*",
-    "#config": "./src/config.ts"
-  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "demo": "node src/cli.ts --demo",

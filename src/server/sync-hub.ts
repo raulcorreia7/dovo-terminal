@@ -1,7 +1,7 @@
 // Fan-out from one upstream RuntimeClient to every connected /ws/sync peer.
 // Pure plumbing: no frame inspection, no retry - clients reconnect themselves.
 import type { WebSocket } from "ws";
-import type { SyncFrame } from "#protocol/sync.ts";
+import type { SyncFrame } from "../protocol/sync.ts";
 
 export class SyncHub {
   private sockets = new Set<WebSocket>();

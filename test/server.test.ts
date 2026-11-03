@@ -4,11 +4,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { WebSocket } from "ws";
-import { createDemoClient } from "#demo/runtime.ts";
-import { ENDPOINTS, syncUrl } from "#protocol/http.ts";
-import { startRuntimeServer, type RunningRuntimeServer } from "#server/index.ts";
-import { SyncFrameSchema } from "#protocol/sync.ts";
-import { TaskSummarySchema } from "#protocol/workspace.ts";
+import { createDemoClient } from "../src/demo/runtime.ts";
+import { ENDPOINTS, syncUrl } from "../src/protocol/http.ts";
+import { startRuntimeServer, type RunningRuntimeServer } from "../src/server/index.ts";
+import { SyncFrameSchema } from "../src/protocol/sync.ts";
+import { TaskSummarySchema } from "../src/protocol/workspace.ts";
 
 const opened: RunningRuntimeServer[] = [];
 function track(server: RunningRuntimeServer): RunningRuntimeServer {

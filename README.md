@@ -128,16 +128,16 @@ dovo token <token> [--profile <name>]
 ## Architecture
 
 ```text
-TUI (#tui) ── RuntimeClient ── RemoteRuntime ── HTTP + /ws/sync ──┐
+TUI (tui/) ── RuntimeClient ── RemoteRuntime ── HTTP + /ws/sync ──┐
                         (the only seam; typed, validated)         │
-                                                    local runtime server (#server)
+                                                    local runtime server (server/)
                                                                   │
                                                     RuntimeClient again, backed by:
                                                     DovoRuntime ── real Dovo Studio
-                                                    DemoRuntime ── scripted (#demo)
+                                                    DemoRuntime ── scripted (demo/)
 ```
 
-One interface (`RuntimeClient`), validated types (`#protocol/*`, zod at every
+One interface (`RuntimeClient`), validated types (`protocol/`, zod at every
 JSON boundary), and a local server that re-exposes any backend on loopback.
 The TUI cannot tell whether a server hop exists; `openRuntime` decides that,
 and `dovo serve` runs the server alone. Deviations from Dovo's wire format are

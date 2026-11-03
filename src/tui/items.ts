@@ -4,7 +4,7 @@ import {
   truncateToWidth,
   type Component,
 } from "@earendil-works/pi-tui";
-import type { ConversationItem } from "#protocol/workspace.ts";
+import type { ConversationItem } from "../protocol/workspace.ts";
 import { colors, markdownTheme, t } from "./theme.ts";
 
 const roleUser = t(" you ", colors.user, { bold: true });

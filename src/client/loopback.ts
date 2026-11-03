@@ -1,11 +1,11 @@
-// RuntimeClient over the loopback protocol (#protocol/http.ts): JSON REST +
+// RuntimeClient over the loopback protocol (protocol/http.ts): JSON REST +
 // /ws/sync. Works with any server that implements the protocol - the bundled
-// one (#server/), or a stand-in in tests. Reconnects with capped backoff and
+// server/, or a stand-in in tests. Reconnects with capped backoff and
 // reports reachability downward. The TUI's only runtime implementation.
-import { type RuntimeClient } from "#client/runtime-client.ts";
-import { DovoError, UpstreamError } from "#protocol/errors.ts";
-import { ENDPOINTS, syncUrl } from "#protocol/http.ts";
-import { SyncFrameSchema, SyncSink, type SyncListener, type Unsubscribe } from "#protocol/sync.ts";
+import { type RuntimeClient } from "./runtime-client.ts";
+import { DovoError, UpstreamError } from "../protocol/errors.ts";
+import { ENDPOINTS, syncUrl } from "../protocol/http.ts";
+import { SyncFrameSchema, SyncSink, type SyncListener, type Unsubscribe } from "../protocol/sync.ts";
 import {
   AgentProviderSchema,
   CreateTaskInputSchema,
@@ -17,7 +17,7 @@ import {
   type Project,
   type TaskHistory,
   type TaskSummary,
-} from "#protocol/workspace.ts";
+} from "../protocol/workspace.ts";
 
 /** Backoff bounds for the /ws/sync reconnect loop. */
 export interface ReconnectPolicy {

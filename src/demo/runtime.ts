@@ -1,16 +1,16 @@
 import { randomUUID } from "node:crypto";
-import type { RuntimeClient } from "#client/runtime-client.ts";
-import { DovoError } from "#protocol/errors.ts";
-import { TASK_TITLE_MAX_CHARS } from "#protocol/workspace.ts";
-import type { CreateTaskInput } from "#protocol/workspace.ts";
-import { SyncSink, type SyncListener, type TaskEvent, type Unsubscribe } from "#protocol/sync.ts";
+import type { RuntimeClient } from "../client/runtime-client.ts";
+import { DovoError } from "../protocol/errors.ts";
+import { TASK_TITLE_MAX_CHARS } from "../protocol/workspace.ts";
+import type { CreateTaskInput } from "../protocol/workspace.ts";
+import { SyncSink, type SyncListener, type TaskEvent, type Unsubscribe } from "../protocol/sync.ts";
 import type {
   AgentProvider,
   ConversationItem,
   Project,
   TaskHistory,
   TaskSummary,
-} from "#protocol/workspace.ts";
+} from "../protocol/workspace.ts";
 
 const SYNC_HINT_AFTER_CREATE_MS = 50;
 

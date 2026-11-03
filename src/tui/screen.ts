@@ -1,8 +1,8 @@
 // What a screen is to the app: build a layout, optionally react. Screens
 // import this contract (and the App handle) - never each other's internals.
 import type { Component, VStack } from "@earendil-works/pi-tui";
-import type { App } from "#tui/app.ts";
-import type { TaskEvent } from "#protocol/sync.ts";
+import type { App } from "./app.ts";
+import type { TaskEvent } from "../protocol/sync.ts";
 
 export interface Screen {
   readonly id: string;

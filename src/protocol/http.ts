@@ -1,7 +1,7 @@
 // Route and channel names of the local runtime protocol - one source for the
 // server implementation and every client of it. Deliberately shaped like
 // Dovo's own routes; payloads are this project's validated schemas
-// (#protocol/workspace.ts, #protocol/sync.ts).
+// (protocol/workspace.ts, protocol/sync.ts).
 export const ENDPOINTS = {
   health: "/health",
   projects: "/api/projects",

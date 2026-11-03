@@ -3,9 +3,9 @@
 import xtermHeadless from "@xterm/headless";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Terminal } from "@earendil-works/pi-tui";
-import { createDemoClient } from "#demo/runtime.ts";
-import { App } from "#tui/app.ts";
-import { TaskListScreen } from "#tui/screens/tasklist.ts";
+import { createDemoClient } from "../src/demo/runtime.ts";
+import { App } from "../src/tui/app.ts";
+import { TaskListScreen } from "../src/tui/screens/tasklist.ts";
 
 const { Terminal: XtermHeadless } = xtermHeadless;
 

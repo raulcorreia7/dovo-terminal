@@ -12,8 +12,8 @@ import http from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import { WebSocketServer } from "ws";
 import type { WebSocket as ClientSocket } from "ws";
-import { createDovoClient } from "#client/dovo-client.ts";
-import type { TaskEvent } from "#protocol/sync.ts";
+import { createDovoClient } from "../src/client/dovo-client.ts";
+import type { TaskEvent } from "../src/protocol/sync.ts";
 
 const { WebSocket } = await import("ws");
 // the client uses the global WebSocket; back it with the ws polyglot impl

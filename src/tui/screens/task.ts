@@ -11,8 +11,8 @@ import {
   type OverlayHandle,
   type SelectItem,
 } from "@earendil-works/pi-tui";
-import type { TaskEvent } from "#protocol/sync.ts";
-import type { ConversationItem, TaskSummary } from "#protocol/workspace.ts";
+import type { TaskEvent } from "../../protocol/sync.ts";
+import type { ConversationItem, TaskSummary } from "../../protocol/workspace.ts";
 import type { App } from "../app.ts";
 import type { Screen } from "../screen.ts";
 import { LineText } from "../line.ts";

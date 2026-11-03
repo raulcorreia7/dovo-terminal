@@ -8,10 +8,10 @@ import { createServer } from "node:http";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer } from "ws";
-import { type RuntimeClient } from "#client/runtime-client.ts";
-import { ENDPOINTS } from "#protocol/http.ts";
-import { handleRequest } from "#server/routes.ts";
-import { SyncHub } from "#server/sync-hub.ts";
+import { type RuntimeClient } from "../client/runtime-client.ts";
+import { ENDPOINTS } from "../protocol/http.ts";
+import { handleRequest } from "./routes.ts";
+import { SyncHub } from "./sync-hub.ts";
 
 export interface RuntimeServerOptions {
   client: RuntimeClient;

@@ -7,7 +7,7 @@ import {
   type Component,
   type SelectItem,
 } from "@earendil-works/pi-tui";
-import type { TaskStatus } from "#protocol/workspace.ts";
+import type { TaskStatus } from "../../protocol/workspace.ts";
 import { note, type App } from "../app.ts";
 import type { Screen } from "../screen.ts";
 import { colors, editorBorder, selectListTheme, t } from "../theme.ts";

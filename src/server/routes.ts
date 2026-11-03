@@ -4,10 +4,10 @@
 // untyped and there is no casting anywhere on this path.
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { type RuntimeClient } from "#client/runtime-client.ts";
-import { ENDPOINTS } from "#protocol/http.ts";
-import { DovoError, UpstreamError } from "#protocol/errors.ts";
-import { CreateTaskInputSchema } from "#protocol/workspace.ts";
+import { type RuntimeClient } from "../client/runtime-client.ts";
+import { ENDPOINTS } from "../protocol/http.ts";
+import { DovoError, UpstreamError } from "../protocol/errors.ts";
+import { CreateTaskInputSchema } from "../protocol/workspace.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const STATUS = {

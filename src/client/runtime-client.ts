@@ -2,21 +2,21 @@
 // The TUI and the local runtime server both depend only on this interface.
 //
 // Implementations (each owns its transport, policy, and wire mapping):
-//   createDovoClient    real Dovo Studio runtime        (#client/dovo-client)
-//   createDemoClient    scripted in-memory runtime      (#demo/runtime)
-//   createRuntimeClient local runtime server, over HTTP + /ws/sync (#client/loopback)
+//   createDovoClient    real Dovo Studio runtime        (client/dovo-client.ts)
+//   createDemoClient    scripted in-memory runtime      (demo/runtime.ts)
+//   createRuntimeClient local runtime server, over HTTP + /ws/sync (client/loopback.ts)
 //
 // Every method rejects with DovoError. Realtime data arrives via subscribe,
 // never polling. Implementations must release everything on close(): sockets,
 // timers, subscriptions; close() resolves when nothing is left running.
-import type { SyncListener, Unsubscribe } from "#protocol/sync.ts";
+import type { SyncListener, Unsubscribe } from "../protocol/sync.ts";
 import type {
   AgentProvider,
   CreateTaskInput,
   Project,
   TaskHistory,
   TaskSummary,
-} from "#protocol/workspace.ts";
+} from "../protocol/workspace.ts";
 
 export interface RuntimeClient {
   /** Realtime frames (task events, connection state, sync hints). */

@@ -7,10 +7,10 @@
 // {"type":"resume"} within 10 s; format 5 activates view subscriptions ("watch")
 // so focused-task activity and streaming updates flow.
 import { randomUUID } from "node:crypto";
-import type { RuntimeClient } from "#client/runtime-client.ts";
-import { DovoError, UpstreamError } from "#protocol/errors.ts";
-import { SyncSink, type SyncListener, type TaskEvent, type Unsubscribe } from "#protocol/sync.ts";
-import type { RuntimeConfig } from "#config";
+import type { RuntimeClient } from "./runtime-client.ts";
+import { DovoError, UpstreamError } from "../protocol/errors.ts";
+import { SyncSink, type SyncListener, type TaskEvent, type Unsubscribe } from "../protocol/sync.ts";
+import type { RuntimeConfig } from "../config.ts";
 import {
   ActivityDeltaSchema,
   ActivityEventListSchema,
@@ -27,8 +27,8 @@ import {
   type WireQuestion,
   type WireSnapshot,
   type WireTask,
-} from "#client/dovo-wire.ts";
-import { TASK_TITLE_MAX_CHARS } from "#protocol/workspace.ts";
+} from "./dovo-wire.ts";
+import { TASK_TITLE_MAX_CHARS } from "../protocol/workspace.ts";
 import type {
   AgentProvider,
   ConversationItem,
@@ -37,7 +37,7 @@ import type {
   TaskHistory,
   TaskStatus,
   TaskSummary,
-} from "#protocol/workspace.ts";
+} from "../protocol/workspace.ts";
 
 // Upstream WS reconnect: start at 1 s, cap at 10 s (Dovo rebases via snapshot
 // frames, so a slow retry is safe).

@@ -6,9 +6,9 @@
 //
 // `dovo serve` splits the same seam from the other side: it runs the server
 // without the TUI and any client can connect with { via: "server", url }.
-import { type RuntimeClient } from "#client/runtime-client.ts";
-import { createRuntimeClient } from "#client/loopback.ts";
-import { startRuntimeServer } from "#server/index.ts";
+import { type RuntimeClient } from "./runtime-client.ts";
+import { createRuntimeClient } from "./loopback.ts";
+import { startRuntimeServer } from "../server/index.ts";
 
 export interface RuntimeSession {
   client: RuntimeClient;

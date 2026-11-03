@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { guard } from "dovo-terminal/protocol/guard.ts";
 import { z } from "zod";
 
 export interface RuntimeConfig {
@@ -11,9 +12,12 @@ export interface RuntimeConfig {
 
 // Files on disk are external input: hand-edited, half-written, stale. Both
 // readers validate through zod first; loose objects keep unrelated keys intact.
+const RuntimeProfileSchema = z.looseObject({ url: z.string(), token: z.string().optional() });
+export type RuntimeProfile = z.infer<typeof RuntimeProfileSchema>;
+
 const ConfigSchema = z.looseObject({
   current: z.string(),
-  runtimes: z.record(z.string(), z.looseObject({ url: z.string(), token: z.string().optional() })),
+  runtimes: z.record(z.string(), RuntimeProfileSchema),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 
@@ -41,18 +45,30 @@ export function configPath(): string {
 
 export function loadConfig(): Config {
   try {
-    const parsed = ConfigSchema.safeParse(JSON.parse(readFileSync(configPath(), "utf8")));
-    if (parsed.success) return parsed.data;
+    const text = readFileSync(configPath(), "utf8");
+    const decoded = JSON.parse(text);
+    return guard(ConfigSchema, decoded);
   } catch {
-    // fall through to default
+    // no file yet, or a file this version cannot read: start from defaults
+    return { current: "local", runtimes: { local: { url: DEFAULT_PRODUCTION_ORIGIN } } };
   }
-  return { current: "local", runtimes: { local: { url: DEFAULT_PRODUCTION_ORIGIN } } };
 }
 
 export function saveConfig(config: Config): void {
   const path = configPath();
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
+  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+}
+
+/** A stored profile token, usable only if it could be a real runtime token. */
+function usableSavedToken(saved: RuntimeProfile | undefined): string | undefined {
+  if (typeof saved?.token !== "string") {
+    return undefined;
+  }
+  if (saved.token.length < TOKEN_MIN_LENGTH) {
+    return undefined;
+  }
+  return saved.token;
 }
 
 /** First usable runtime target: flags > saved profile > local runtime discovery. */
@@ -71,10 +87,7 @@ export function resolveRuntime(flags: {
       `no runtime profile "${flags.profile}"; pass --url http://host:port or run: dovo add <name> <url>`,
     );
   }
-  // A stored token shorter than the runtime's own minimum is junk from an old
-  // test; it must not hijack discovery of a live local runtime.
-  const savedToken =
-    typeof saved?.token === "string" && saved.token.length >= TOKEN_MIN_LENGTH ? saved.token : undefined;
+  const savedToken = usableSavedToken(saved);
   if (savedToken && saved) {
     return { url: normalizeUrl(saved.url), token: savedToken };
   }
@@ -107,38 +120,53 @@ function discoverLocalRuntime(): RuntimeConfig | null {
 }
 
 function connectionPaths(): string[] {
-  if (process.env["DOVO_DATABASE_PATH"]) {
-    return [join(dirname(process.env["DOVO_DATABASE_PATH"]), CONNECTION_FILE)];
+  const dbPath = process.env["DOVO_DATABASE_PATH"];
+  if (dbPath) {
+    return [join(dirname(dbPath), CONNECTION_FILE)];
   }
-  const dirs = process.env["DOVO_DATA_ROOT"]
-    ? [process.env["DOVO_DATA_ROOT"], join(process.env["DOVO_DATA_ROOT"], "desktop")]
-    : [
-        join(homedir(), DOVO_DATA_DIR),
-        join(homedir(), DOVO_DATA_DIR, "desktop"),
-        // apps/api dev mode (dev-environment.ts) uses ~/.dovo-dev + port 8789.
-        join(homedir(), DOVO_DEV_DATA_DIR),
-        join(appDataDir(), "@dovo", "desktop"),
-        join(appDataDir(), "Dovo Studio"),
-      ];
+  const dataRoot = process.env["DOVO_DATA_ROOT"];
+  let dirs: string[];
+  if (dataRoot) {
+    dirs = [dataRoot, join(dataRoot, "desktop")];
+  } else {
+    dirs = [
+      join(homedir(), DOVO_DATA_DIR),
+      join(homedir(), DOVO_DATA_DIR, "desktop"),
+      // apps/api dev mode (dev-environment.ts) uses ~/.dovo-dev + port 8789.
+      join(homedir(), DOVO_DEV_DATA_DIR),
+      join(appDataDir(), "@dovo", "desktop"),
+      join(appDataDir(), "Dovo Studio"),
+    ];
+  }
   return dirs.map((dir) => join(dir, CONNECTION_FILE)).filter(existsSync);
 }
 
 function appDataDir(): string {
-  if (process.platform === "darwin") return join(homedir(), "Library", "Application Support");
-  if (process.platform === "win32") return process.env["APPDATA"] ?? join(homedir(), "AppData", "Roaming");
+  if (process.platform === "darwin") {
+    return join(homedir(), "Library", "Application Support");
+  }
+  if (process.platform === "win32") {
+    return process.env["APPDATA"] ?? join(homedir(), "AppData", "Roaming");
+  }
   return process.env["XDG_CONFIG_HOME"] ?? join(homedir(), ".config");
 }
 
 /** Validation identical to the runtime's own reader: origin-only address, ≥32-char token, live pid. */
 function readConnection(path: string): RuntimeConfig {
-  const parsed = ConnectionFileSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
-  if (!parsed.success) throw new Error(`invalid runtime connection file: ${path}`);
-  const { address, token, pid } = parsed.data;
+  let parsed: z.infer<typeof ConnectionFileSchema>;
+  try {
+    const text = readFileSync(path, "utf8");
+    const decoded = JSON.parse(text);
+    parsed = guard(ConnectionFileSchema, decoded);
+  } catch (cause) {
+    throw new Error(`invalid runtime connection file: ${path}`, { cause });
+  }
+  const { address, token, pid } = parsed;
   // A killed runtime can leave its discovery file behind; only a live pid counts.
   try {
     process.kill(pid, 0);
-  } catch {
-    throw new Error(`stale runtime connection file (pid ${pid} is gone): ${path}`);
+  } catch (cause) {
+    throw new Error(`stale runtime connection file (pid ${pid} is gone): ${path}`, { cause });
   }
   const url = new URL(address);
   if (
@@ -159,13 +187,21 @@ function readConnection(path: string): RuntimeConfig {
  * database file (default ~/.dovo/runtime.sqlite). DOVO_OWNER_TOKEN wins.
  */
 function discoverOwnerToken(): string | undefined {
-  if (process.env["DOVO_OWNER_TOKEN"]) return process.env["DOVO_OWNER_TOKEN"];
+  if (process.env["DOVO_OWNER_TOKEN"]) {
+    return process.env["DOVO_OWNER_TOKEN"];
+  }
   const dbPath = process.env["DOVO_DATABASE_PATH"] ?? join(homedir(), DOVO_DATA_DIR, DATABASE_FILE);
-  const candidates = [dirname(dbPath), join(homedir(), DOVO_DATA_DIR), join(homedir(), DOVO_DEV_DATA_DIR)];
+  const candidates = [
+    dirname(dbPath),
+    join(homedir(), DOVO_DATA_DIR),
+    join(homedir(), DOVO_DEV_DATA_DIR),
+  ];
   for (const directory of candidates) {
     try {
       const token = readFileSync(join(directory, OWNER_TOKEN_FILE), "utf8").trim();
-      if (token.length >= TOKEN_MIN_LENGTH) return token;
+      if (token.length >= TOKEN_MIN_LENGTH) {
+        return token;
+      }
     } catch {
       // try the next candidate
     }
@@ -173,7 +209,13 @@ function discoverOwnerToken(): string | undefined {
   return undefined;
 }
 
+const TRAILING_SLASHES = /\/+$/u;
+const FULL_ORIGIN = /^https?:\/\//u;
+
 export function normalizeUrl(url: string): string {
-  const trimmed = url.replace(/\/+$/, "");
-  return /^https?:\/\//.test(trimmed) ? trimmed : `http://${trimmed}`;
+  const trimmed = url.replace(TRAILING_SLASHES, "");
+  if (FULL_ORIGIN.test(trimmed)) {
+    return trimmed;
+  }
+  return `http://${trimmed}`;
 }

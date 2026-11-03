@@ -4,14 +4,21 @@
 // past the interface.
 import { once } from "node:events";
 import { parseArgs } from "node:util";
-import { openRuntime } from "./client/connect.ts";
-import { createDovoClient } from "./client/dovo.ts";
-import { type RuntimeClient } from "./client/runtime-client.ts";
-import { DEFAULT_PRODUCTION_ORIGIN, loadConfig, resolveRuntime, saveConfig } from "./config.ts";
-import { createDemoClient } from "./client/demo.ts";
-import { startRuntimeServer } from "./server/index.ts";
-import { App } from "./tui/app.ts";
-import { TaskListScreen } from "./tui/screens/tasklist.ts";
+import { openRuntime, type RuntimeRoute } from "dovo-terminal/client/connect.ts";
+import { createDemoClient } from "dovo-terminal/client/demo.ts";
+import { createDovoClient } from "dovo-terminal/client/dovo.ts";
+import type { RuntimeClient } from "dovo-terminal/client/runtime-client.ts";
+import {
+  DEFAULT_PRODUCTION_ORIGIN,
+  loadConfig,
+  type RuntimeProfile,
+  resolveRuntime,
+  saveConfig,
+} from "dovo-terminal/config.ts";
+import { errorMessage } from "dovo-terminal/protocol/errors.ts";
+import { startRuntimeServer } from "dovo-terminal/server/index.ts";
+import { App } from "dovo-terminal/tui/app.ts";
+import { TaskListScreen } from "dovo-terminal/tui/screens/tasklist.ts";
 
 const DEFAULT_SERVE_PORT = 8790;
 
@@ -44,8 +51,10 @@ interface Options {
   port?: string;
 }
 
-async function buildBackend(values: Options): Promise<RuntimeClient> {
-  if (values.demo) return createDemoClient();
+function buildBackend(values: Options): RuntimeClient {
+  if (values.demo) {
+    return createDemoClient();
+  }
   const runtime = resolveRuntime({ url: values.url, token: values.token, profile: values.profile });
   return createDovoClient(runtime);
 }
@@ -65,16 +74,37 @@ async function runServe(values: Options): Promise<void> {
 }
 
 async function runTerminal(values: Options): Promise<void> {
-  const backend = values.server ? null : await buildBackend(values);
+  let backend: RuntimeClient | null = null;
+  if (!values.server) {
+    backend = buildBackend(values);
+  }
   const session = await openRuntime(backend, routeFor(values));
   const app = new App(session.client);
-  process.title = `dovo-terminal (${values.server ?? values.url ?? (values.demo ? "demo" : "runtime")})`;
+  process.title = `dovo-terminal (${describeBackend(values)})`;
   await app.start(new TaskListScreen(app));
 }
 
-function routeFor(values: Options) {
-  if (values.server) return { via: "server", url: values.server } as const;
-  if (values.local) return { via: "local" } as const;
+/** What the process title reports about the chosen backend. */
+function describeBackend(values: Options): string {
+  if (values.server) {
+    return values.server;
+  }
+  if (values.url) {
+    return values.url;
+  }
+  if (values.demo) {
+    return "demo";
+  }
+  return "runtime";
+}
+
+function routeFor(values: Options): RuntimeRoute {
+  if (values.server) {
+    return { via: "server", url: values.server } as const;
+  }
+  if (values.local) {
+    return { via: "local" } as const;
+  }
   return { via: "loopback" } as const;
 }
 
@@ -94,37 +124,69 @@ async function main(): Promise<void> {
   });
 
   if (values.help) {
-    process.stdout.write(USAGE + "\n");
+    process.stdout.write(`${USAGE}\n`);
     return;
   }
 
-  const command = positionals[0];
-  if (command === "serve") return runServe(values);
+  await dispatchCommand(positionals[0], values, positionals);
+}
+
+async function dispatchCommand(
+  command: string | undefined,
+  values: Options,
+  positionals: string[],
+): Promise<void> {
+  if (command === "serve") {
+    await runServe(values);
+    return;
+  }
   if (command === "add") {
-    const [, name, url] = positionals;
-    if (!name || !url) throw new Error("usage: dovo add <name> <url>");
-    const config = loadConfig();
-    config.runtimes[name] = { url, ...(values.token ? { token: values.token } : {}) };
-    if (!config.current || config.current === "local") config.current = name;
-    saveConfig(config);
-    process.stdout.write(`saved runtime "${name}" → ${url}\n`);
+    addRuntime(values, positionals);
     return;
   }
   if (command === "token") {
-    const [, token] = positionals;
-    if (!token) throw new Error("usage: dovo token <token>");
-    const config = loadConfig();
-    const name = values.profile ?? config.current;
-    config.runtimes[name] = { ...(config.runtimes[name] ?? { url: DEFAULT_PRODUCTION_ORIGIN }), token };
-    saveConfig(config);
-    process.stdout.write(`saved token for runtime "${name}"\n`);
+    addToken(values, positionals);
     return;
   }
+  await runTerminal(values);
+}
 
-  return runTerminal(values);
+/** `dovo add`: remember a named runtime; the first one becomes current. */
+function addRuntime(values: Options, positionals: string[]): void {
+  const [, name, url] = positionals;
+  if (!(name && url)) {
+    throw new Error("usage: dovo add <name> <url>");
+  }
+  const config = loadConfig();
+  const profile: RuntimeProfile = { url };
+  if (values.token) {
+    profile.token = values.token;
+  }
+  config.runtimes[name] = profile;
+  if (!config.current || config.current === "local") {
+    config.current = name;
+  }
+  saveConfig(config);
+  process.stdout.write(`saved runtime "${name}" → ${url}\n`);
+}
+
+/** `dovo token`: attach an owner token to a runtime profile. */
+function addToken(values: Options, positionals: string[]): void {
+  const [, token] = positionals;
+  if (!token) {
+    throw new Error("usage: dovo token <token>");
+  }
+  const config = loadConfig();
+  const name = values.profile ?? config.current;
+  config.runtimes[name] = {
+    ...(config.runtimes[name] ?? { url: DEFAULT_PRODUCTION_ORIGIN }),
+    token,
+  };
+  saveConfig(config);
+  process.stdout.write(`saved token for runtime "${name}"\n`);
 }
 
 main().catch((error: unknown) => {
-  process.stderr.write(`dovo-terminal: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.stderr.write(`dovo-terminal: ${errorMessage(error)}\n`);
   process.exit(1);
 });

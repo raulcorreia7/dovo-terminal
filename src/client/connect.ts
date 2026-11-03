@@ -6,9 +6,10 @@
 //
 // `dovo serve` splits the same seam from the other side: it runs the server
 // without the TUI and any client can connect with { via: "server", url }.
-import { type RuntimeClient } from "./runtime-client.ts";
-import { createRuntimeClient } from "./loopback.ts";
-import { startRuntimeServer } from "../server/index.ts";
+
+import { createRuntimeClient } from "dovo-terminal/client/loopback.ts";
+import type { RuntimeClient } from "dovo-terminal/client/runtime-client.ts";
+import { startRuntimeServer } from "dovo-terminal/server/index.ts";
 
 export interface RuntimeSession {
   client: RuntimeClient;
@@ -27,11 +28,13 @@ export async function openRuntime(
   if (route.via === "server") {
     // An already-running `dovo serve`; nothing to own or close upstream.
     const client = createRuntimeClient({ url: route.url });
-    return { client, close: () => client.close() };
+    return { client, close: async () => client.close() };
   }
-  if (!backend) throw new Error("this runtime route needs a backend");
+  if (!backend) {
+    throw new Error("this runtime route needs a backend");
+  }
   if (route.via === "local") {
-    return { client: backend, close: () => backend.close() };
+    return { client: backend, close: async () => backend.close() };
   }
   const server = await startRuntimeServer({
     client: backend,

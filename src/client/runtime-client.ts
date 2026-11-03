@@ -9,21 +9,21 @@
 // Every method rejects with DovoError. Realtime data arrives via subscribe,
 // never polling. Implementations must release everything on close(): sockets,
 // timers, subscriptions; close() resolves when nothing is left running.
-import type { SyncListener, Unsubscribe } from "../protocol/sync.ts";
+import type { SyncListener, Unsubscribe } from "dovo-terminal/protocol/sync.ts";
 import type {
   AgentProvider,
   CreateTaskInput,
   Project,
   TaskHistory,
   TaskSummary,
-} from "../protocol/workspace.ts";
+} from "dovo-terminal/protocol/workspace.ts";
 
 export interface RuntimeClient {
   /** Realtime frames (task events, connection state, sync hints). */
   subscribe(listener: SyncListener): Unsubscribe;
   /** Open the realtime channel; safe to call once after construction. */
   connect(): void;
-  close(): Promise<void>;
+  close(): void;
   /** Retarget full thread detail + activity to one task (null = none). */
   focusTask(taskId: string | null): void;
 

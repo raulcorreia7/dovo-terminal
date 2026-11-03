@@ -2,22 +2,38 @@
 // /ws/sync. Works with any server that implements the protocol - the bundled
 // server/, or a stand-in in tests. Reconnects with capped backoff and
 // reports reachability downward. The TUI's only runtime implementation.
-import { type RuntimeClient } from "./runtime-client.ts";
-import { DovoError, UpstreamError } from "../protocol/errors.ts";
-import { ENDPOINTS, syncUrl } from "../protocol/http.ts";
-import { SyncFrameSchema, SyncSink, type SyncListener, type Unsubscribe } from "../protocol/sync.ts";
+import type { RuntimeClient } from "dovo-terminal/client/runtime-client.ts";
+import { ConnectionStateMachine } from "dovo-terminal/protocol/connection-state.ts";
+import { DovoError } from "dovo-terminal/protocol/errors.ts";
+import { guard } from "dovo-terminal/protocol/guard.ts";
+import { ENDPOINTS, lifecycleAction, syncUrl } from "dovo-terminal/protocol/http.ts";
 import {
-  AgentProviderSchema,
-  CreateTaskInputSchema,
-  ProjectSchema,
-  TaskHistorySchema,
-  TaskSummarySchema,
+  type ConnectionPhase,
+  SyncFrameSchema,
+  type SyncListener,
+  type Unsubscribe,
+} from "dovo-terminal/protocol/sync.ts";
+import { SyncSink } from "dovo-terminal/protocol/sync-sink.ts";
+import { UpstreamError } from "dovo-terminal/protocol/upstream-error.ts";
+import {
   type AgentProvider,
+  AgentProviderSchema,
   type CreateTaskInput,
+  CreateTaskInputSchema,
   type Project,
+  ProjectSchema,
   type TaskHistory,
+  TaskHistorySchema,
   type TaskSummary,
-} from "../protocol/workspace.ts";
+  TaskSummarySchema,
+} from "dovo-terminal/protocol/workspace.ts";
+
+// Response shapes the loopback protocol returns as JSON arrays.
+const ProjectListSchema = ProjectSchema.array();
+const TaskSummaryListSchema = TaskSummarySchema.array();
+const AgentProviderListSchema = AgentProviderSchema.array();
+
+const TRAILING_SLASHES = /\/+$/u;
 
 /** Backoff bounds for the /ws/sync reconnect loop. */
 export interface ReconnectPolicy {
@@ -25,7 +41,7 @@ export interface ReconnectPolicy {
   maxMs?: number;
 }
 
-const DEFAULT_RECONNECT = { baseMs: 250, maxMs: 2_000 } as const;
+const DEFAULT_RECONNECT = { baseMs: 250, maxMs: 2000 } as const;
 const NO_CONTENT = 204;
 const PROBLEM_DETAIL_CHARS = 200;
 
@@ -40,10 +56,10 @@ export class LoopbackRuntimeClient implements RuntimeClient {
   private sink = new SyncSink();
   private socket: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private closed = false;
+  private connection = new ConnectionStateMachine();
 
   constructor(httpUrl: string, reconnect: ReconnectPolicy = {}) {
-    this.httpUrl = httpUrl.replace(/\/+$/, "");
+    this.httpUrl = httpUrl.replace(TRAILING_SLASHES, "");
     this.reconnect = { ...DEFAULT_RECONNECT, ...reconnect };
     this.retryDelay = this.reconnect.baseMs;
   }
@@ -56,9 +72,11 @@ export class LoopbackRuntimeClient implements RuntimeClient {
     this.openSocket();
   }
 
-  async close(): Promise<void> {
-    this.closed = true;
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+  close(): void {
+    this.publishConnection("offline");
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+    }
     this.socket?.close();
     this.socket = null;
     this.sink.clear();
@@ -69,26 +87,31 @@ export class LoopbackRuntimeClient implements RuntimeClient {
     void this.put(ENDPOINTS.view, { taskId }).catch(() => undefined);
   }
 
-  listProjects(): Promise<Project[]> {
-    return this.get(ENDPOINTS.projects).then((data) => ProjectSchema.array().parse(data));
+  async listProjects(): Promise<Project[]> {
+    const data = await this.get(ENDPOINTS.projects);
+    return guard(ProjectListSchema, data);
   }
 
-  listTasks(): Promise<TaskSummary[]> {
-    return this.get(ENDPOINTS.tasks).then((data) => TaskSummarySchema.array().parse(data));
+  async listTasks(): Promise<TaskSummary[]> {
+    const data = await this.get(ENDPOINTS.tasks);
+    return guard(TaskSummaryListSchema, data);
   }
 
-  listProviders(): Promise<AgentProvider[]> {
-    return this.get(ENDPOINTS.providers).then((data) => AgentProviderSchema.array().parse(data));
+  async listProviders(): Promise<AgentProvider[]> {
+    const data = await this.get(ENDPOINTS.providers);
+    return guard(AgentProviderListSchema, data);
   }
 
-  getTaskHistory(taskId: string): Promise<TaskHistory> {
+  async getTaskHistory(taskId: string): Promise<TaskHistory> {
     const path = `${ENDPOINTS.taskHistory}?taskId=${encodeURIComponent(taskId)}`;
-    return this.get(path).then((data) => TaskHistorySchema.parse(data));
+    const data = await this.get(path);
+    return guard(TaskHistorySchema, data);
   }
 
-  createTask(input: CreateTaskInput): Promise<TaskSummary> {
-    const body = CreateTaskInputSchema.parse(input);
-    return this.post(ENDPOINTS.createTask, body).then((data) => TaskSummarySchema.parse(data));
+  async createTask(input: CreateTaskInput): Promise<TaskSummary> {
+    const body = guard(CreateTaskInputSchema, input);
+    const data = await this.post(ENDPOINTS.createTask, body);
+    return guard(TaskSummarySchema, data);
   }
 
   async sendMessage(taskId: string, text: string): Promise<void> {
@@ -100,7 +123,7 @@ export class LoopbackRuntimeClient implements RuntimeClient {
   }
 
   async setTaskArchived(taskId: string, archived: boolean): Promise<void> {
-    await this.post(ENDPOINTS.lifecycle, { taskId, action: archived ? "archive" : "restore" });
+    await this.post(ENDPOINTS.lifecycle, { taskId, action: lifecycleAction(archived) });
   }
 
   async deleteTask(taskId: string): Promise<void> {
@@ -128,31 +151,54 @@ export class LoopbackRuntimeClient implements RuntimeClient {
     try {
       response = await fetch(this.httpUrl + path, init);
     } catch (cause) {
-      throw new DovoError(`runtime server at ${this.httpUrl} is unreachable`, cause);
+      throw new DovoError(`runtime server at ${this.httpUrl} is unreachable`, { cause });
     }
-    if (!response.ok) throw await errorFromResponse(response);
-    if (response.status === NO_CONTENT) return undefined;
+    if (!response.ok) {
+      throw await errorFromResponse(response);
+    }
+    if (response.status === NO_CONTENT) {
+      return undefined;
+    }
     return response.json();
   }
 
   private openSocket(): void {
-    if (this.closed) return;
+    if (this.connection.phase === "offline") {
+      return; // close() is terminal
+    }
+    this.publishConnection("connecting");
     const socket = new WebSocket(syncUrl(this.httpUrl));
     this.socket = socket;
     socket.onopen = () => {
       this.retryDelay = this.reconnect.baseMs;
-      this.sink.publish({ type: "connection", connected: true });
+      this.publishConnection("online");
     };
     socket.onmessage = (message: MessageEvent) => {
-      const frame = parseFrame(String(message.data));
-      if (frame) this.sink.publish(frame);
+      try {
+        const decoded = JSON.parse(String(message.data));
+        const frame = guard(SyncFrameSchema, decoded);
+        this.sink.publish(frame);
+      } catch {
+        // an unknown frame must never take the UI down
+      }
     };
     socket.onclose = () => {
       this.socket = null;
-      this.sink.publish({ type: "connection", connected: false });
-      if (!this.closed) this.scheduleReconnect();
+      if (this.connection.phase === "offline") {
+        return; // close() is terminal; it already announced offline
+      }
+      this.publishConnection("reconnecting");
+      this.scheduleReconnect();
     };
     socket.onerror = () => socket.close();
+  }
+
+  /** Sole writer of connection state: an illegal transition is never emitted. */
+  private publishConnection(to: ConnectionPhase): void {
+    if (!this.connection.transition(to)) {
+      return;
+    }
+    this.sink.publish({ type: "connection", state: to });
   }
 
   private scheduleReconnect(): void {
@@ -162,17 +208,12 @@ export class LoopbackRuntimeClient implements RuntimeClient {
   }
 }
 
-function parseFrame(text: string) {
-  try {
-    return SyncFrameSchema.parse(JSON.parse(text));
-  } catch {
-    return undefined; // an unknown frame must never take the UI down
-  }
-}
-
 async function errorFromResponse(response: Response): Promise<DovoError> {
   const detail = await response.text().catch(() => "");
-  return new DovoError(`runtime server: ${response.status} ${detail.slice(0, PROBLEM_DETAIL_CHARS)}`, new UpstreamError(detail, response.status));
+  return new DovoError(
+    `runtime server: ${response.status} ${detail.slice(0, PROBLEM_DETAIL_CHARS)}`,
+    new UpstreamError(detail, response.status),
+  );
 }
 
 /** Connects to a local runtime server; the TUI's only entry point. */

@@ -102,34 +102,53 @@ export const ToolPayloadSchema = Loose({
 export const ActivityEventListSchema = z.array(ActivityEventSchema);
 
 // WS activity-delta frames: field- replacements plus payload text edits.
+export const MessageTextDeltaSchema = Loose({ append: z.string() });
+export const PayloadTextDeltaSchema = Loose({
+  length: z.number(),
+  offset: z.number(),
+  remove: z.number(),
+  insert: z.string(),
+});
+
 export const ActivityDeltaSchema = Loose({
   changes: z
     .array(
       Loose({
         fields: ActivityEventSchema.optional(),
-        payload: z
-          .union([z.string(), Loose({ length: z.number(), offset: z.number(), remove: z.number(), insert: z.string() })])
-          .optional(),
+        payload: z.union([z.string(), PayloadTextDeltaSchema]).optional(),
       }),
     )
     .optional(),
 });
 export type ActivityDelta = z.infer<typeof ActivityDeltaSchema>;
 
+// Sync-channel frame envelope: the payload of each case is parsed by its own
+// schema (SnapshotSchema, SyncDeltaSchema, ActivityEventListSchema, ...).
+export const SyncFrameSchema = Loose({ type: z.string() });
+export type SyncFrame = z.infer<typeof SyncFrameSchema>;
+
 // Sync-channel payloads: snapshot/selection/delta frames, the consumed subset.
-const SyncTaskChangeSchema = Loose({
+// Message field patches carry any subset of messageSchema.
+const MessagePatchSchema = Loose({
+  id: z.string(),
+  role: z.string().optional(),
+  text: z.string().optional(),
+});
+export const MessageChangeSchema = Loose({
+  fields: MessagePatchSchema.optional(),
+  text: z.union([z.string(), MessageTextDeltaSchema]).optional(),
+});
+export type MessageChange = z.infer<typeof MessageChangeSchema>;
+export const SyncTaskChangeSchema = Loose({
   id: z.string(),
   fields: z.record(z.string(), z.unknown()).optional(),
   fieldDelta: Loose({
     values: z.record(z.string(), z.unknown()).optional(),
     removed: z.array(z.string()).optional(),
   }).optional(),
-  messages: Loose({
-    changes: z
-      .array(Loose({ fields: WireMessageSchema.optional(), text: z.unknown().optional() }))
-      .optional(),
-  }).optional(),
+  messages: Loose({ changes: z.array(MessageChangeSchema).optional() }).optional(),
 });
+export type SyncTaskChange = z.infer<typeof SyncTaskChangeSchema>;
 export const SyncDeltaSchema = Loose({
   state: Loose({
     approvals: z.array(WireApprovalSchema).optional(),
@@ -148,3 +167,85 @@ export const MutationOutcomeSchema = Loose({
 });
 
 export const SyncTicketSchema = Loose({ ticket: z.string() });
+
+// Request bodies the client must produce (documented in dovo-api-contract.md).
+// Built and asserted through these same schemas - one contract, two ends.
+export const MessageBodySchema = z.object({
+  id: z.string(),
+  messageId: z.string(),
+  text: z.string().min(1),
+});
+export type MessageBody = z.infer<typeof MessageBodySchema>;
+
+export const CancelTaskBodySchema = z.object({
+  id: z.string(),
+  runId: z.string(),
+});
+export type CancelTaskBody = z.infer<typeof CancelTaskBodySchema>;
+
+export const ApprovalBodySchema = z.object({
+  id: z.string(),
+  allow: z.boolean(),
+  decision: z.enum(["approve", "session", "always", "deny"]),
+});
+export type ApprovalBody = z.infer<typeof ApprovalBodySchema>;
+
+export const LifecycleBodySchema = z.object({
+  id: z.string(),
+  action: z.enum(["archive", "restore", "delete"]),
+});
+export type LifecycleBody = z.infer<typeof LifecycleBodySchema>;
+
+export const AnswerBodySchema = z.object({
+  id: z.string(),
+  answers: z.record(z.string(), z.array(z.string())),
+});
+export type AnswerBody = z.infer<typeof AnswerBodySchema>;
+
+// Task-draft body for workspace creates: complete metadata at creation time.
+export const WireHarnessDraftSchema = z.object({
+  provider: z.string(),
+  model: z.string(),
+  reasoning: z.string(),
+  serviceTier: z.string(),
+  instructions: z.string(),
+  permission: z.string(),
+  endpoint: z.string(),
+});
+export type WireHarnessDraft = z.infer<typeof WireHarnessDraftSchema>;
+
+export const WireTaskDraftSchema = z.object({
+  id: z.string(),
+  repositoryId: z.string(),
+  title: z.string(),
+  agentId: z.string(),
+  harness: WireHarnessDraftSchema.optional(),
+  execution: z.literal("main"),
+  status: z.literal("draft"),
+  createdAt: z.string(),
+  messages: z.tuple([]),
+  files: z.tuple([]),
+  draft: z.string(),
+  example: z.boolean(),
+});
+export type WireTaskDraft = z.infer<typeof WireTaskDraftSchema>;
+
+export const CreateTaskBodySchema = z.object({
+  collection: z.literal("tasks"),
+  id: z.string(),
+  changes: z.unknown(),
+  create: WireTaskDraftSchema,
+});
+export type CreateTaskBody = z.infer<typeof CreateTaskBodySchema>;
+
+// Input frames accepted on the sync channel (connection.ts upstream):
+// watch carries the task list and activity scopes as arrays.
+export const SyncInputFrameSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("resume"),
+    epoch: z.string().optional(),
+    sequence: z.number().int().optional(),
+  }),
+  z.object({ type: z.literal("watch"), tasks: z.array(z.string()), scopes: z.array(z.string()) }),
+]);
+export type SyncInputFrame = z.infer<typeof SyncInputFrameSchema>;

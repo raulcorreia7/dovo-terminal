@@ -131,8 +131,8 @@ server.on("upgrade", (req, socket, head) => {
     liveRef.socket = client;
     client.on("message", (rawData) => {
       const input = JSON.parse(String(rawData)) as Record<string, unknown>;
-      if (input.type === "resume") {
-        if (typeof input.sequence === "number") cursor.sawResumeWithCursor = true;
+      if (input["type"] === "resume") {
+        if (typeof input["sequence"] === "number") cursor.sawResumeWithCursor = true;
         if (!cursor.bootstrapped) {
           cursor.bootstrapped = true;
           client.send(JSON.stringify({ type: "snapshot", epoch: "e1", sequence: 5, tag: "t", snapshot: snapshot() }));
@@ -145,7 +145,7 @@ server.on("upgrade", (req, socket, head) => {
           cursor.lastSeq = 6;
         }
         client.send(JSON.stringify({ type: "heartbeat", epoch: "e1", sequence: cursor.lastSeq }));
-      } else if (input.type === "watch") {
+      } else if (input["type"] === "watch") {
         client.send(JSON.stringify({ type: "activity", scope: TASK, order: { revision: 1, total: 1 }, events: [ { id: "ev-2", time: now, kind: "tool", scope: TASK, summary: "read", payload: JSON.stringify({ status: "running", presentation: { input: "read x.ts" } }) } ] }));
         client.send(JSON.stringify({ type: "activity-delta", scope: TASK, delta: { changes: [{ fields: { id: "ev-2", kind: "tool", scope: TASK, summary: "read" }, payload: JSON.stringify({ status: "completed", presentation: { input: "read x.ts" } }) }] } }));
         cursor.lastSeq += 1;
@@ -205,9 +205,9 @@ expect(
 
 await client.sendMessage(TASK, "please fix");
 expect(
-  seen.message?.id === TASK &&
-    typeof seen.message?.messageId === "string" &&
-    seen.message?.text === "please fix" &&
+  seen.message?.["id"] === TASK &&
+    typeof seen.message?.["messageId"] === "string" &&
+    seen.message?.["text"] === "please fix" &&
     !("turnSettings" in (seen.message ?? {})),
   "message body = {id, messageId, text}, no turnSettings",
 );
@@ -216,8 +216,8 @@ await client.createTask({ projectId: REPO, providerId: AGENT, prompt: "New thing
 const create = seen.create as { collection?: string; create?: Record<string, unknown>; changes?: unknown } | undefined;
 expect(
   create?.collection === "tasks" &&
-    create?.create?.status === "draft" &&
-    !!create?.create?.title &&
+    create?.create?.["status"] === "draft" &&
+    !!create?.create?.["title"] &&
     typeof create?.changes === "object",
   "task creation = workspace PATCH with complete draft metadata",
 );
@@ -230,7 +230,7 @@ await client.createTask({ projectId: REPO, providerId: AGENT, prompt: "x" }).cat
 expect(rejection.includes("rejected"), "HTTP 200 with outcome=rejected surfaces as an error");
 
 await client.stopTask(TASK);
-expect(seen.cancel?.id === TASK && seen.cancel?.runId === RUN, "cancel carries the observed activeRunId");
+expect(seen.cancel?.["id"] === TASK && seen.cancel?.["runId"] === RUN, "cancel carries the observed activeRunId");
 
 // live streaming assistant text (delta applied against the bootstrapped snapshot)
 expect(
@@ -266,7 +266,7 @@ expect(
 );
 
 await client.answerItem(TASK, "approval:ap-1", "always");
-expect(seen.approvals?.id === "ap-1" && seen.approvals?.decision === "always", "approval answer uses decision field");
+expect(seen.approvals?.["id"] === "ap-1" && seen.approvals?.["decision"] === "always", "approval answer uses decision field");
 
 // heartbeat ahead of the client's cursor must trigger a cursor-bearing resume
 await wait(150);

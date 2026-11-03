@@ -188,7 +188,6 @@ export class TaskScreen implements Screen {
     const items: SelectItem[] = options.map((option) => ({
       value: option.id,
       label: option.label,
-      description: undefined,
     }));
     const list = new SelectList(items, Math.min(8, items.length + 2), selectListTheme);
     list.onSelect = (selected) => {

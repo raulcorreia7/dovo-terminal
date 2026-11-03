@@ -8,7 +8,7 @@ import { createDemoClient } from "../src/client/demo.ts";
 import { ENDPOINTS, syncUrl } from "../src/protocol/http.ts";
 import { startRuntimeServer, type RunningRuntimeServer } from "../src/server/index.ts";
 import { SyncFrameSchema } from "../src/protocol/sync.ts";
-import { TaskSummarySchema } from "../src/protocol/workspace.ts";
+import { ProjectSchema, TaskHistorySchema, TaskSummarySchema } from "../src/protocol/workspace.ts";
 
 const opened: RunningRuntimeServer[] = [];
 function track(server: RunningRuntimeServer): RunningRuntimeServer {
@@ -32,17 +32,19 @@ test("health answers without auth or backend calls", async () => {
 
 test("reads map onto the RuntimeClient interface", async () => {
   const server = await start();
-  const projects = await fetch(server.url + ENDPOINTS.projects).then((r) => r.json());
-  assert.ok(projects.length > 0 && typeof projects[0].id === "string");
+  const projects = ProjectSchema.array().parse(
+    await fetch(server.url + ENDPOINTS.projects).then((r) => r.json()),
+  );
+  assert.ok(projects.length > 0 && typeof projects[0]?.id === "string");
   const tasks = TaskSummarySchema.array().parse(
     await fetch(server.url + ENDPOINTS.tasks).then((r) => r.json()),
   );
   const first = tasks[0];
   assert.ok(first);
-  const history = await fetch(
-    `${server.url}${ENDPOINTS.taskHistory}?taskId=${first.id}`,
-  ).then((r) => r.json());
-  assert.ok(history.items.some((item: { kind: string }) => item.kind === "user"));
+  const history = TaskHistorySchema.parse(
+    await fetch(`${server.url}${ENDPOINTS.taskHistory}?taskId=${first.id}`).then((r) => r.json()),
+  );
+  assert.ok(history.items.some((item) => item.kind === "user"));
 });
 
 test("create -> message -> history works end to end over the wire", async () => {
@@ -57,17 +59,19 @@ test("create -> message -> history works end to end over the wire", async () => 
     method: "POST",
     body: JSON.stringify({ taskId: task.id, text: "and a follow-up" }),
   });
-  const items = await fetch(`${server.url}${ENDPOINTS.taskHistory}?taskId=${task.id}`)
-    .then((r) => r.json())
-    .then((history) => history.items.map((item: { text?: string }) => item.text ?? ""));
-  assert.ok(items.some((text: string) => text.includes("hello wire")));
+  const history = TaskHistorySchema.parse(
+    await fetch(`${server.url}${ENDPOINTS.taskHistory}?taskId=${task.id}`).then((r) => r.json()),
+  );
+  const texts = history.items.map((item) => ("text" in item ? item.text : ""));
+  assert.ok(texts.some((text) => text.includes("hello wire")));
 });
 
 test("unknown task ids surface as 400, not 500", async () => {
   const server = await start();
   const response = await fetch(`${server.url}${ENDPOINTS.taskHistory}?taskId=bogus`);
   assert.equal(response.status, 400);
-  assert.match((await response.json()).error, /unknown task/);
+  const body = (await response.json()) as { error: string };
+  assert.match(body.error, /unknown task/);
 });
 
 test("invalid bodies are rejected with 400 before reaching the runtime", async () => {
@@ -87,13 +91,17 @@ test("unknown paths and methods never reach the runtime", async () => {
 
 test("lifecycle: archive hides, restore returns, delete removes", async () => {
   const server = await start();
-  const list = () =>
-    fetch(server.url + ENDPOINTS.tasks).then((r) => r.json()).then((t: { id: string }[]) => t.map((x) => x.id));
-  const created = await fetch(server.url + ENDPOINTS.createTask, {
+  const list = async () => {
+    const tasks = TaskSummarySchema.array().parse(
+      await fetch(server.url + ENDPOINTS.tasks).then((r) => r.json()),
+    );
+    return tasks.map((x) => x.id);
+  };
+  const response = await fetch(server.url + ENDPOINTS.createTask, {
     method: "POST",
     body: JSON.stringify({ projectId: "p-alpha", providerId: "codex", prompt: "lifecycle" }),
-  }).then((r) => r.json());
-  const id = created.id;
+  });
+  const id = TaskSummarySchema.parse(await response.json()).id;
   const lifecycle = (action: string) =>
     fetch(server.url + ENDPOINTS.lifecycle, { method: "POST", body: JSON.stringify({ taskId: id, action }) });
 

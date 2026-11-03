@@ -48,7 +48,7 @@ export class TaskListScreen implements Screen {
     this.filter.onChange = (text) => this.list?.setFilter(text.trim());
   }
 
-  build(): { root: VStack; focus?: Component } {
+  build(): { root: VStack; focus?: Component | undefined } {
     this.rebuildList();
     const { focus } = this.compose();
     return { root: this.root, focus };

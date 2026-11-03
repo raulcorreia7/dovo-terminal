@@ -5,7 +5,8 @@ import { z } from "zod";
 
 export interface RuntimeConfig {
   url: string;
-  token?: string;
+  /** absent means "discover one" (env, connection file, owner-token file) */
+  token?: string | undefined;
 }
 
 // Files on disk are external input: hand-edited, half-written, stale. Both
@@ -35,7 +36,7 @@ const ConnectionFileSchema = z.looseObject({
 const CONFIG_PATH = join(homedir(), ".config", "dovo-terminal", "config.json");
 
 export function configPath(): string {
-  return process.env.DOVO_TUI_CONFIG ?? CONFIG_PATH;
+  return process.env["DOVO_TUI_CONFIG"] ?? CONFIG_PATH;
 }
 
 export function loadConfig(): Config {
@@ -56,9 +57,9 @@ export function saveConfig(config: Config): void {
 
 /** First usable runtime target: flags > saved profile > local runtime discovery. */
 export function resolveRuntime(flags: {
-  url?: string;
-  token?: string;
-  profile?: string;
+  url?: string | undefined;
+  token?: string | undefined;
+  profile?: string | undefined;
 }): RuntimeConfig {
   if (flags.url) {
     return { url: normalizeUrl(flags.url), token: flags.token ?? discoverOwnerToken() };
@@ -106,11 +107,11 @@ function discoverLocalRuntime(): RuntimeConfig | null {
 }
 
 function connectionPaths(): string[] {
-  if (process.env.DOVO_DATABASE_PATH) {
-    return [join(dirname(process.env.DOVO_DATABASE_PATH), CONNECTION_FILE)];
+  if (process.env["DOVO_DATABASE_PATH"]) {
+    return [join(dirname(process.env["DOVO_DATABASE_PATH"]), CONNECTION_FILE)];
   }
-  const dirs = process.env.DOVO_DATA_ROOT
-    ? [process.env.DOVO_DATA_ROOT, join(process.env.DOVO_DATA_ROOT, "desktop")]
+  const dirs = process.env["DOVO_DATA_ROOT"]
+    ? [process.env["DOVO_DATA_ROOT"], join(process.env["DOVO_DATA_ROOT"], "desktop")]
     : [
         join(homedir(), DOVO_DATA_DIR),
         join(homedir(), DOVO_DATA_DIR, "desktop"),
@@ -124,8 +125,8 @@ function connectionPaths(): string[] {
 
 function appDataDir(): string {
   if (process.platform === "darwin") return join(homedir(), "Library", "Application Support");
-  if (process.platform === "win32") return process.env.APPDATA ?? join(homedir(), "AppData", "Roaming");
-  return process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config");
+  if (process.platform === "win32") return process.env["APPDATA"] ?? join(homedir(), "AppData", "Roaming");
+  return process.env["XDG_CONFIG_HOME"] ?? join(homedir(), ".config");
 }
 
 /** Validation identical to the runtime's own reader: origin-only address, ≥32-char token, live pid. */
@@ -158,8 +159,8 @@ function readConnection(path: string): RuntimeConfig {
  * database file (default ~/.dovo/runtime.sqlite). DOVO_OWNER_TOKEN wins.
  */
 function discoverOwnerToken(): string | undefined {
-  if (process.env.DOVO_OWNER_TOKEN) return process.env.DOVO_OWNER_TOKEN;
-  const dbPath = process.env.DOVO_DATABASE_PATH ?? join(homedir(), DOVO_DATA_DIR, DATABASE_FILE);
+  if (process.env["DOVO_OWNER_TOKEN"]) return process.env["DOVO_OWNER_TOKEN"];
+  const dbPath = process.env["DOVO_DATABASE_PATH"] ?? join(homedir(), DOVO_DATA_DIR, DATABASE_FILE);
   const candidates = [dirname(dbPath), join(homedir(), DOVO_DATA_DIR), join(homedir(), DOVO_DEV_DATA_DIR)];
   for (const directory of candidates) {
     try {

@@ -7,7 +7,7 @@ import type { TaskEvent } from "../protocol/sync.ts";
 export interface Screen {
   readonly id: string;
   /** Build the layout tree; called once when shown. */
-  build(app: App): { root: VStack; focus?: Component };
+  build(app: App): { root: VStack; focus?: Component | undefined };
   /** Global-ish keys before focus routing. Return true to consume. */
   handleKey?(data: string): boolean;
   onEvent?(event: TaskEvent): void;

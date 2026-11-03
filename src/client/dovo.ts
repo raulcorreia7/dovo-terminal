@@ -331,8 +331,8 @@ class DovoRuntime implements RuntimeClient {
       .then(toProviders)
       .catch(() => [] as AgentProvider[]);
     if (profiles.some((profile) => profile.id === input.providerId)) {
-      create.agentId = input.providerId;
-      delete create.harness;
+      create["agentId"] = input.providerId;
+      delete create["harness"];
     }
     // A 200 here can still mean "rejected": the store validates the create
     // after schema decode and reports the verdict in `outcome`, never a status.
@@ -527,23 +527,23 @@ class DovoRuntime implements RuntimeClient {
     } catch {
       return;
     }
-    switch (frame.type) {
+    switch (frame["type"]) {
       case "snapshot": {
-        this.epoch = String(frame.epoch ?? "");
-        this.sequence = Number(frame.sequence ?? 0);
-        this.applySnapshotBaseline(frame.snapshot as WireSnapshot | undefined);
+        this.epoch = String(frame["epoch"] ?? "");
+        this.sequence = Number(frame["sequence"] ?? 0);
+        this.applySnapshotBaseline(frame["snapshot"] as WireSnapshot | undefined);
         break;
       }
       case "selection": {
-        this.epoch = String(frame.epoch ?? "");
-        this.sequence = Number(frame.sequence ?? 0);
-        const selection = SyncDeltaSchema.safeParse(frame.delta ?? {});
+        this.epoch = String(frame["epoch"] ?? "");
+        this.sequence = Number(frame["sequence"] ?? 0);
+        const selection = SyncDeltaSchema.safeParse(frame["delta"] ?? {});
         if (selection.success) this.applyDelta(selection.data, true);
         break;
       }
       case "delta": {
-        const base = Number(frame.base ?? -1);
-        if (frame.epoch !== this.epoch) {
+        const base = Number(frame["base"] ?? -1);
+        if (frame["epoch"] !== this.epoch) {
           // new view epoch: re-fetch a ticket for a fresh baseline
           this.publishConnection(false);
           this.socket?.close();
@@ -555,8 +555,8 @@ class DovoRuntime implements RuntimeClient {
           this.sendInput({ type: "resume", epoch: this.epoch, sequence: this.sequence });
           return;
         }
-        this.sequence = Number(frame.sequence ?? this.sequence);
-        const delta = SyncDeltaSchema.safeParse(frame.delta ?? {});
+        this.sequence = Number(frame["sequence"] ?? this.sequence);
+        const delta = SyncDeltaSchema.safeParse(frame["delta"] ?? {});
         if (!delta.success) break; // a malformed delta is dropped; heartbeat resumes
         this.applyDelta(delta.data, false);
         this.sink.publish({ type: "sync" });
@@ -564,18 +564,18 @@ class DovoRuntime implements RuntimeClient {
       }
       case "activity": {
         // a malformed batch is dropped wholesale; partial tool state is worse
-        const events = ActivityEventListSchema.safeParse(frame.events ?? []);
-        if (events.success) this.applyActivity(String(frame.scope ?? ""), events.data);
+        const events = ActivityEventListSchema.safeParse(frame["events"] ?? []);
+        if (events.success) this.applyActivity(String(frame["scope"] ?? ""), events.data);
         break;
       }
       case "activity-delta": {
-        const delta = ActivityDeltaSchema.safeParse(frame.delta ?? {});
-        this.applyActivityDelta(String(frame.scope ?? ""), delta.success ? delta.data : {});
+        const delta = ActivityDeltaSchema.safeParse(frame["delta"] ?? {});
+        this.applyActivityDelta(String(frame["scope"] ?? ""), delta.success ? delta.data : {});
         break;
       }
       case "heartbeat": {
-        const sequence = Number(frame.sequence ?? this.sequence);
-        if (frame.epoch === this.epoch && sequence > this.sequence) {
+        const sequence = Number(frame["sequence"] ?? this.sequence);
+        if (frame["epoch"] === this.epoch && sequence > this.sequence) {
           // missed frames: resume replays from our cursor or rebases us
           this.sendInput({ type: "resume", epoch: this.epoch, sequence: this.sequence });
         } else {
@@ -633,8 +633,8 @@ class DovoRuntime implements RuntimeClient {
       };
       const task = this.tasks.get(taskId);
       let status: TaskStatus | null = null;
-      if (typeof values.status === "string") status = statusMap[values.status] ?? "unknown";
-      if (typeof values.activeRunId === "string" && task) task.activeRunId = values.activeRunId;
+      if (typeof values["status"] === "string") status = statusMap[values["status"]] ?? "unknown";
+      if (typeof values["activeRunId"] === "string" && task) task.activeRunId = values["activeRunId"];
       if (fullReplace) status = null; // selection handoffs re-fetch via getTaskHistory
 
       for (const messageChange of change.messages?.changes ?? []) {
@@ -680,7 +680,7 @@ class DovoRuntime implements RuntimeClient {
 
   private applyMessageChange(
     taskId: string,
-    change: { fields?: WireMessage & { text?: unknown }; text?: unknown },
+    change: { fields?: (WireMessage & { text?: unknown }) | undefined; text?: unknown },
   ): void {
     const fields = change.fields;
     if (!fields?.id) return;

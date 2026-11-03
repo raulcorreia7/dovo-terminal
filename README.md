@@ -125,13 +125,32 @@ dovo token <token> [--profile <name>]
 | dev runtime not found | check `ls ~/.dovo-dev`; if `runtime-connection.json` is missing, the server never finished starting |
 | `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` | Node is older than 22.19; install a newer one |
 
+## Architecture
+
+```text
+TUI (#tui) ── RuntimeClient ── RemoteRuntime ── HTTP + /ws/sync ──┐
+                        (the only seam; typed, validated)         │
+                                                    local runtime server (#server)
+                                                                  │
+                                                    RuntimeClient again, backed by:
+                                                    DovoRuntime ── real Dovo Studio
+                                                    DemoRuntime ── scripted (#demo)
+```
+
+One interface (`RuntimeClient`), validated types (`#protocol/*`, zod at every
+JSON boundary), and a local server that re-exposes any backend on loopback.
+The TUI cannot tell whether a server hop exists; `openRuntime` decides that,
+and `dovo serve` runs the server alone. Deviations from Dovo's wire format are
+confined to one adapter and documented in
+[docs/local-runtime-protocol.md](docs/local-runtime-protocol.md); the audited
+upstream contract is [docs/dovo-api-contract.md](docs/dovo-api-contract.md).
+
 ## Development
 
 ```sh
 npm run verify        # typecheck + UI smoke test + runtime contract test
 npm run typecheck     # tsc, strictest flags, src and test
-npm run smoke         # drives the real TUI headless against a mock runtime
-npm run test:runtime  # checks wire traffic against a fake runtime server
+npm run smoke         # drives the real TUI headless against a demo runtime
+npm run test:runtime  # checks wire traffic against a fake Dovo server
+npm test              # node:test suites: local server protocol + client/server integration
 ```
-
-The client contract this implementation follows, with the exact endpoints and frames, is [docs/dovo-api-contract.md](docs/dovo-api-contract.md).

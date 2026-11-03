@@ -2,35 +2,45 @@
   "name": "dovo-terminal",
   "version": "0.1.0",
   "description": "Terminal client for Dovo Studio",
-  "main": "index.js",
-  "files": [
-    "src"
-  ],
-  "scripts": {
-    "typecheck": "tsc --noEmit",
-    "demo": "node src/cli.ts --demo",
-    "smoke": "node test/smoke.ts",
-    "test:runtime": "node test/runtime-contract.ts",
-    "verify": "tsc --noEmit && node test/smoke.ts && node test/runtime-contract.ts"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "type": "module",
   "bin": {
     "dovo": "./src/cli.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "imports": {
+    "#protocol/*": "./src/protocol/*",
+    "#client/*": "./src/client/*",
+    "#server/*": "./src/server/*",
+    "#demo/*": "./src/demo/*",
+    "#tui/*": "./src/tui/*",
+    "#config": "./src/config.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "demo": "node src/cli.ts --demo",
+    "serve": "node src/cli.ts serve --demo",
+    "test": "node --test test/server.test.ts test/integration.test.ts",
+    "smoke": "node test/smoke.ts",
+    "test:runtime": "node test/runtime-contract.ts",
+    "verify": "tsc --noEmit && node test/smoke.ts && node test/runtime-contract.ts && node --test test/server.test.ts test/integration.test.ts"
   },
   "engines": {
     "node": ">=22.19"
   },
   "dependencies": {
-    "@earendil-works/pi-tui": "^1.5.0"
+    "@earendil-works/pi-tui": "^1.5.0",
+    "ws": "^8.22.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "@types/ws": "^8.18.2",
     "@xterm/headless": "^6.0.0",
-    "typescript": "^7.0.2",
-    "ws": "^8.22.1"
-  }
+    "typescript": "^7.0.2"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }

@@ -1,19 +1,19 @@
-// Drives the REAL RuntimeClient against an in-process fake runtime that
-// implements the audited Dovo wire contract (dovocode/dovo-studio @ a3297a9):
+// Drives the REAL Dovo runtime adapter (createDovoClient) against an in-process
+// fake runtime that implements the audited Dovo wire contract (dovocode/dovo-studio @ a3297a9):
 //   GET  /api/snapshot?scope=overview | ?scope=threads&task=  -> workspace + approvals/questions
 //   POST /api/activity            -> {events:[…]}  (an object envelope, NOT a bare array)
 //   POST /api/sync/ticket         -> {ticket}
 //   WS   /ws/sync?ticket          -> resume→snapshot/delta/heartbeat; watch→activity(+delta)
 //   POST /api/tasks/message | /api/workspace | /api/tasks/cancel | /api/approvals
-// Asserts both the outbound request bodies and the internal events the client
-// derives from the frames. This is the runtime-client's end-to-end check; the
-// UI smoke test uses MockClient and does not exercise any of this file.
+// Asserts both the outbound request bodies and the sync frames the adapter
+// derives from them. The local server and its own protocol are covered by
+// server.test.ts / integration.test.ts; the UI smoke test uses DemoClient.
 import http from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import { WebSocketServer } from "ws";
 import type { WebSocket as ClientSocket } from "ws";
-import { createRuntimeClient } from "../src/api/runtime-client.ts";
-import type { TaskEvent } from "../src/api/types.ts";
+import { createDovoClient } from "#client/dovo-client.ts";
+import type { TaskEvent } from "#protocol/sync.ts";
 
 const { WebSocket } = await import("ws");
 // the client uses the global WebSocket; back it with the ws polyglot impl
@@ -161,11 +161,13 @@ server.on("upgrade", (req, socket, head) => {
 });
 
 // --- drive the real client --------------------------------------------------
-const client = createRuntimeClient({ url: `http://127.0.0.1:${port}`, token: "t".repeat(32) });
+const client = createDovoClient({ url: `http://127.0.0.1:${port}`, token: "t".repeat(32) });
 const events: TaskEvent[] = [];
 let connected = false;
-client.onEvent = (event) => events.push(event);
-client.onConnection = (up) => (connected = up);
+client.subscribe((frame) => {
+  if (frame.type === "event") events.push(frame.event);
+  else if (frame.type === "connection") connected = frame.connected;
+});
 
 const failures: string[] = [];
 function expect(condition: boolean, label: string): void {
@@ -271,7 +273,7 @@ await wait(150);
 liveRef.socket?.send(JSON.stringify({ type: "heartbeat", epoch: "e1", sequence: cursor.lastSeq + 3 }));
 expect(await waitFor(() => cursor.sawResumeWithCursor), "heartbeat gap triggers resume with cursor");
 
-client.close();
+await client.close();
 wss.close();
 server.close();
 

@@ -7,92 +7,44 @@
 // {"type":"resume"} within 10 s; format 5 activates view subscriptions ("watch")
 // so focused-task activity and streaming updates flow.
 import { randomUUID } from "node:crypto";
-import { DovoError, type CreateTaskInput, type DovoClient } from "./client.ts";
-import type { RuntimeConfig } from "../config.ts";
+import type { RuntimeClient } from "#client/runtime-client.ts";
+import { DovoError, UpstreamError } from "#protocol/errors.ts";
+import { SyncSink, type SyncListener, type TaskEvent, type Unsubscribe } from "#protocol/sync.ts";
+import type { RuntimeConfig } from "#config";
+import {
+  ActivityDeltaSchema,
+  ActivityEventListSchema,
+  ActivityPageSchema,
+  AgentAvailabilityListSchema,
+  MutationOutcomeSchema,
+  SnapshotSchema,
+  SyncTicketSchema,
+  ToolPayloadSchema,
+  type ActivityDelta,
+  type ActivityEvent,
+  type WireApproval,
+  type WireMessage,
+  type WireQuestion,
+  type WireSnapshot,
+  type WireTask,
+} from "#client/dovo-wire.ts";
+import { TASK_TITLE_MAX_CHARS } from "#protocol/workspace.ts";
 import type {
   AgentProvider,
   ConversationItem,
+  CreateTaskInput,
   Project,
-  TaskEvent,
   TaskHistory,
   TaskStatus,
   TaskSummary,
-} from "./types.ts";
+} from "#protocol/workspace.ts";
 
-/* ------------------------------------------------------------------ wire ---- */
-
-interface WireSnapshot {
-  runtimeInstanceId?: string;
-  approvals?: WireApproval[];
-  questions?: WireQuestion[];
-  workspace?: {
-    repositories?: { id: string; name: string; path: string }[];
-    agents?: { id: string; name: string; provider: string }[];
-    tasks?: WireTask[];
-  };
-}
-
-interface WireTask {
-  id: string;
-  title?: string;
-  repositoryId?: string;
-  agentId?: string;
-  harness?: { provider?: string };
-  status?: string;
-  activeRunId?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  archivedAt?: string | null;
-  messages?: WireMessage[];
-}
-
-interface WireMessage {
-  id: string;
-  role: string;
-  text: string;
-  createdAt?: string;
-}
-
-interface WireApproval {
-  id: string;
-  taskId: string;
-  title: string;
-  detail?: string;
-  scopes?: { session?: boolean; always?: boolean };
-}
-
-interface WireQuestion {
-  id: string;
-  taskId: string;
-  prompt: {
-    title?: string;
-    questions: {
-      id: string;
-      question: string;
-      header?: string;
-      options?: { value: string; label: string }[];
-      custom?: boolean;
-    }[];
-  };
-}
-
-interface ActivityEvent {
-  id: string;
-  time?: string;
-  kind?: string;
-  scope?: string;
-  summary?: string;
-  payload?: string;
-}
-
-interface ActivityDelta {
-  changes?: {
-    fields?: ActivityEvent;
-    payload?: string | { length: number; offset: number; remove: number; insert: string };
-  }[];
-}
-
-/* ------------------------------------------------------------- status map --- */
+// Upstream WS reconnect: start at 1 s, cap at 10 s (Dovo rebases via snapshot
+// frames, so a slow retry is safe).
+const RECONNECT_INITIAL_MS = 1_000;
+const RECONNECT_MAX_MS = 10_000;
+const PROBLEM_DETAIL_CHARS = 300; // upstream error body kept in DovoError
+const TOOL_DETAIL_MAX_CHARS = 120; // one line of tool output in the transcript
 
 const statusMap: Record<string, TaskStatus> = {
   draft: "idle",
@@ -106,9 +58,7 @@ const statusMap: Record<string, TaskStatus> = {
 function mapStatus(task: WireTask, pending: Set<string>): TaskStatus {
   if (task.id && pending.has(task.id)) return "waiting";
   return statusMap[task.status ?? ""] ?? "unknown";
-}
-
-/* ------------------------------------------------------------- translation -- */
+};
 
 function toProjects(snapshot: WireSnapshot): Project[] {
   return (snapshot.workspace?.repositories ?? []).map((repo) => ({
@@ -172,20 +122,17 @@ function questionItem(question: WireQuestion): ConversationItem {
   };
 }
 
-/* ------------------------------------------------------------------ client -- */
-
-export function createRuntimeClient(config: RuntimeConfig): DovoClient {
-  return new RuntimeClient(config);
+/** Talks to a real Dovo Studio runtime (apps/api); used by the local server. */
+export function createDovoClient(config: RuntimeConfig): RuntimeClient {
+  return new DovoRuntime(config);
 }
 
-class RuntimeClient implements DovoClient {
-  onEvent: ((event: TaskEvent) => void) | null = null;
-  onConnection: ((connected: boolean) => void) | null = null;
-  onSync: (() => void) | null = null;
+class DovoRuntime implements RuntimeClient {
+  private sink = new SyncSink();
 
   private socket: WebSocket | null = null;
   private closed = false;
-  private retryMs = 1_000;
+  private retryMs = RECONNECT_INITIAL_MS;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private epoch: string | null = null;
   private sequence = 0;
@@ -214,9 +161,8 @@ class RuntimeClient implements DovoClient {
     this.config = config;
   }
 
-  /* ------------------------------------------------------------------- http */
-
-  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+  /** All upstream JSON lands here; callers must validate with a dovo-wire schema. */
+  private async request(path: string, init?: RequestInit): Promise<unknown> {
     const response = await fetch(this.config.url + path, {
       ...init,
       headers: {
@@ -229,17 +175,22 @@ class RuntimeClient implements DovoClient {
     });
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new DovoError(`HTTP ${response.status} ${path}: ${body.slice(0, 300)}`);
+      throw new DovoError(
+        `HTTP ${response.status} ${path}: ${body.slice(0, PROBLEM_DETAIL_CHARS)}`,
+        new UpstreamError(body, response.status),
+      );
     }
-    return (await response.json()) as T;
+    return await response.json();
   }
 
   private snapshot(query: string): Promise<WireSnapshot> {
     let pending = this.inflight.get(query);
     if (!pending) {
-      pending = this.request<WireSnapshot>(`/api/snapshot${query}`).finally(() => {
-        this.inflight.delete(query);
-      });
+      pending = this.request(`/api/snapshot${query}`)
+        .then((data) => SnapshotSchema.parse(data))
+        .finally(() => {
+          this.inflight.delete(query);
+        });
       this.inflight.set(query, pending);
     }
     return pending;
@@ -266,9 +217,8 @@ class RuntimeClient implements DovoClient {
     const snapshot = await this.snapshot("?scope=overview");
     const providers = toProviders(snapshot);
     try {
-      const availability = await this.request<{ id: string; available: boolean }[]>(
-        "/api/agents/availability",
-        { method: "POST", body: "{}" },
+      const availability = AgentAvailabilityListSchema.parse(
+        await this.request("/api/agents/availability", { method: "POST", body: "{}" }),
       );
       for (const entry of availability) {
         if (!entry.available || !entry.id.startsWith("harness:")) continue;
@@ -313,10 +263,12 @@ class RuntimeClient implements DovoClient {
     try {
       // /api/activity returns {events:[…]} (routes.ts:1134 → activitySchema),
       // not a bare array; includeDetails stays false for the compact payloads.
-      const page = await this.request<{ events?: ActivityEvent[] }>("/api/activity", {
-        method: "POST",
-        body: JSON.stringify({ scope: taskId, query: "tool", kind: "tool", offset: 0 }),
-      });
+      const page = ActivityPageSchema.parse(
+        await this.request("/api/activity", {
+          method: "POST",
+          body: JSON.stringify({ scope: taskId, query: "tool", kind: "tool", offset: 0 }),
+        }),
+      );
       return (page.events ?? [])
         .filter((event) => event.kind === "tool")
         .map((event) => this.toToolItem(event));
@@ -330,17 +282,13 @@ class RuntimeClient implements DovoClient {
     let detail = "";
     try {
       // Compacted tool payload (activity.ts): {status, presentation:{kind,input,detail,diff}}.
-      const payload = JSON.parse(String(event.payload ?? "{}")) as {
-        status?: string;
-        text?: string;
-        presentation?: { input?: unknown; detail?: unknown; diff?: unknown };
-      };
+      const payload = ToolPayloadSchema.parse(JSON.parse(String(event.payload ?? "{}")));
       if (payload.status && /fail|error|denied/i.test(payload.status)) state = "error";
       else if (payload.status && /complete|success|ok|done/i.test(payload.status)) state = "ok";
       const line = payload.presentation?.input ?? payload.presentation?.detail ?? payload.text;
-      if (typeof line === "string") detail = line.split("\n")[0]?.slice(0, 120) ?? "";
+      if (typeof line === "string") detail = line.split("\n")[0]?.slice(0, TOOL_DETAIL_MAX_CHARS) ?? "";
     } catch {
-      /* payload not JSON; keep defaults */
+      /* payload absent or not JSON; keep defaults */
     }
     return {
       kind: "tool",
@@ -351,12 +299,10 @@ class RuntimeClient implements DovoClient {
     };
   }
 
-  /* ----------------------------------------------------------------- writes */
-
   async createTask(input: CreateTaskInput): Promise<TaskSummary> {
     const taskId = randomUUID();
     const now = new Date().toISOString();
-    const title = input.prompt.split("\n")[0]!.slice(0, 72);
+    const title = input.prompt.split("\n")[0]!.slice(0, TASK_TITLE_MAX_CHARS);
     const create: Record<string, unknown> = {
       id: taskId,
       repositoryId: input.projectId,
@@ -388,11 +334,13 @@ class RuntimeClient implements DovoClient {
     }
     // A 200 here can still mean "rejected": the store validates the create
     // after schema decode and reports the verdict in `outcome`, never a status.
-    const patch = await this.request<{ outcome?: string; reason?: string }>("/api/workspace", {
-      method: "PATCH",
-      headers: { "X-Dovo-Mutation-Id": randomUUID() },
-      body: JSON.stringify({ collection: "tasks", id: taskId, changes: {}, create }),
-    });
+    const patch = MutationOutcomeSchema.parse(
+      await this.request("/api/workspace", {
+        method: "PATCH",
+        headers: { "X-Dovo-Mutation-Id": randomUUID() },
+        body: JSON.stringify({ collection: "tasks", id: taskId, changes: {}, create }),
+      }),
+    );
     if (patch.outcome && !["applied", "reconciled"].includes(patch.outcome)) {
       throw new DovoError(`task create rejected: ${patch.reason ?? patch.outcome}`);
     }
@@ -502,17 +450,21 @@ class RuntimeClient implements DovoClient {
     throw new DovoError(`question ${wireId} is no longer pending`);
   }
 
-  /* ---------------------------------------------------------------- realtime */
+  subscribe(listener: SyncListener): Unsubscribe {
+    return this.sink.subscribe(listener);
+  }
 
   connect(): void {
     void this.openChannel();
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.closed = true;
     clearTimeout(this.reconnectTimer);
     this.socket?.close();
     this.socket = null;
+    this.inflight.clear();
+    this.sink.clear();
   }
 
   focusTask(taskId: string | null): void {
@@ -530,16 +482,15 @@ class RuntimeClient implements DovoClient {
   private async openChannel(): Promise<void> {
     if (this.closed) return;
     try {
-      const { ticket } = await this.request<{ ticket: string }>(
-        "/api/sync/ticket?format=5&history=paged",
-        { method: "POST", body: "{}" },
+      const { ticket } = SyncTicketSchema.parse(
+        await this.request("/api/sync/ticket?format=5&history=paged", { method: "POST", body: "{}" }),
       );
       const url = this.config.url.replace(/^http/, "ws") + `/ws/sync?ticket=${encodeURIComponent(ticket)}`;
       const socket = new WebSocket(url);
       this.socket = socket;
       socket.addEventListener("open", () => {
-        this.retryMs = 1_000;
-        this.onConnection?.(true);
+        this.retryMs = RECONNECT_INITIAL_MS;
+        this.publishConnection(true);
         socket.send(JSON.stringify({ type: "resume" }));
         if (this.focused) {
           socket.send(JSON.stringify({ type: "watch", tasks: [this.focused], scopes: [this.focused] }));
@@ -557,14 +508,14 @@ class RuntimeClient implements DovoClient {
 
   private scheduleReconnect(): void {
     if (this.closed) return;
-    this.onConnection?.(false);
+    this.publishConnection(false);
     this.socket = null;
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = setTimeout(() => {
       this.epoch = null;
       void this.openChannel();
     }, this.retryMs);
-    this.retryMs = Math.min(this.retryMs * 2, 10_000);
+    this.retryMs = Math.min(this.retryMs * 2, RECONNECT_MAX_MS);
   }
 
   private handleFrame(raw: string): void {
@@ -591,7 +542,7 @@ class RuntimeClient implements DovoClient {
         const base = Number(frame.base ?? -1);
         if (frame.epoch !== this.epoch) {
           // new view epoch: re-fetch a ticket for a fresh baseline
-          this.onConnection?.(false);
+          this.publishConnection(false);
           this.socket?.close();
           return;
         }
@@ -603,21 +554,20 @@ class RuntimeClient implements DovoClient {
         }
         this.sequence = Number(frame.sequence ?? this.sequence);
         this.applyDelta(frame.delta as Record<string, unknown>, false);
-        this.onSync?.();
+        this.sink.publish({ type: "sync" });
         break;
       }
-      case "activity":
-        this.applyActivity(
-          String(frame.scope ?? ""),
-          (frame.events ?? []) as ActivityEvent[],
-        );
+      case "activity": {
+        // a malformed batch is dropped wholesale; partial tool state is worse
+        const events = ActivityEventListSchema.safeParse(frame.events ?? []);
+        if (events.success) this.applyActivity(String(frame.scope ?? ""), events.data);
         break;
-      case "activity-delta":
-        this.applyActivityDelta(
-          String(frame.scope ?? ""),
-          (frame.delta ?? {}) as ActivityDelta,
-        );
+      }
+      case "activity-delta": {
+        const delta = ActivityDeltaSchema.safeParse(frame.delta ?? {});
+        this.applyActivityDelta(String(frame.scope ?? ""), delta.success ? delta.data : {});
         break;
+      }
       case "heartbeat": {
         const sequence = Number(frame.sequence ?? this.sequence);
         if (frame.epoch === this.epoch && sequence > this.sequence) {
@@ -800,6 +750,10 @@ class RuntimeClient implements DovoClient {
   }
 
   private emit(event: TaskEvent): void {
-    this.onEvent?.(event);
+    this.sink.publish({ type: "event", event });
+  }
+
+  private publishConnection(connected: boolean): void {
+    this.sink.publish({ type: "connection", connected });
   }
 }

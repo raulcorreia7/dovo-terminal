@@ -5,32 +5,20 @@ import {
   Text,
   TuiAltScreen,
   VStack,
-  type Component,
   type OverlayHandle,
   type Terminal,
 } from "@earendil-works/pi-tui";
-import type { DovoClient } from "../api/client.ts";
+import type { RuntimeClient } from "#client/runtime-client.ts";
+import type { SyncFrame, TaskEvent, Unsubscribe } from "#protocol/sync.ts";
 import type {
   AgentProvider,
   Project,
-  TaskEvent,
   TaskSummary,
-} from "../api/types.ts";
+} from "#protocol/workspace.ts";
 import { HelpView } from "./help.ts";
 import { LineText } from "./line.ts";
 import { colors, t } from "./theme.ts";
-
-export interface Screen {
-  readonly id: string;
-  /** Build the layout tree; called once when shown. */
-  build(app: App): { root: VStack; focus?: Component };
-  /** Global-ish keys before focus routing. Return true to consume. */
-  handleKey?(data: string): boolean;
-  onEvent?(event: TaskEvent): void;
-  onTasksUpdated?(): void;
-  onConnection?(connected: boolean): void;
-  destroy?(): void;
-}
+import type { Screen } from "#tui/screen.ts";
 
 export class App {
   readonly tui: TuiAltScreen;
@@ -38,6 +26,7 @@ export class App {
   private header: LineText | null = null;
   private helpOverlay: OverlayHandle | null = null;
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  private unsubscribe: Unsubscribe | null = null;
   private stopped = false;
 
   projects: Project[] = [];
@@ -46,23 +35,15 @@ export class App {
   connected = false;
   statusNote = "";
 
-  readonly client: DovoClient;
+  readonly client: RuntimeClient;
 
-  constructor(client: DovoClient, terminal: Terminal = new ProcessTerminal()) {
+  constructor(client: RuntimeClient, terminal: Terminal = new ProcessTerminal()) {
     this.client = client;
     this.tui = new TuiAltScreen(terminal);
   }
 
   async start(initial: Screen): Promise<void> {
-    this.client.onEvent = (event) => this.routeEvent(event);
-    this.client.onSync = () => this.scheduleRefresh();
-    this.client.onConnection = (connected) => {
-      this.connected = connected;
-      if (connected) this.scheduleRefresh();
-      this.updateHeader();
-      this.screen?.onConnection?.(connected);
-      this.tui.requestRender();
-    };
+    this.unsubscribe = this.client.subscribe((frame) => this.onFrame(frame));
     this.tui.addInputListener((data) => this.onInput(data));
 
     let fatal: Error | null = null;
@@ -79,11 +60,31 @@ export class App {
     this.tui.start();
   }
 
+  /** One frame handler; each branch stays a single dispatch. */
+  private onFrame(frame: SyncFrame): void {
+    switch (frame.type) {
+      case "event":
+        this.routeEvent(frame.event);
+        return;
+      case "sync":
+        this.scheduleRefresh();
+        return;
+      case "connection":
+        this.connected = frame.connected;
+        if (frame.connected) this.scheduleRefresh();
+        this.updateHeader();
+        this.screen?.onConnection?.(frame.connected);
+        this.tui.requestRender();
+        return;
+    }
+  }
+
   quit(): void {
     if (this.stopped) return;
     this.stopped = true;
     clearTimeout(this.refreshTimer);
-    this.client.close();
+    this.unsubscribe?.();
+    void this.client.close();
     this.tui.stop();
     process.exit(0);
   }

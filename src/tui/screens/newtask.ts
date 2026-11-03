@@ -7,7 +7,8 @@ import {
   type Component,
   type SelectItem,
 } from "@earendil-works/pi-tui";
-import type { App, Screen } from "../app.ts";
+import type { App } from "../app.ts";
+import type { Screen } from "../screen.ts";
 import { colors, editorBorder, selectListTheme, t } from "../theme.ts";
 import { LineText } from "../line.ts";
 import { TaskScreen } from "./task.ts";

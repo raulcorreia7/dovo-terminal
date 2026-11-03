@@ -1,20 +1,25 @@
 import { randomUUID } from "node:crypto";
-import type { DovoClient, CreateTaskInput } from "./client.ts";
+import type { RuntimeClient } from "#client/runtime-client.ts";
+import { DovoError } from "#protocol/errors.ts";
+import { TASK_TITLE_MAX_CHARS } from "#protocol/workspace.ts";
+import type { CreateTaskInput } from "#protocol/workspace.ts";
+import { SyncSink, type SyncListener, type TaskEvent, type Unsubscribe } from "#protocol/sync.ts";
 import type {
   AgentProvider,
   ConversationItem,
   Project,
-  TaskEvent,
   TaskHistory,
   TaskSummary,
-} from "./types.ts";
+} from "#protocol/workspace.ts";
+
+const SYNC_HINT_AFTER_CREATE_MS = 50;
 
 // Deterministic fake runtime: streams scripted agent turns with the same event
-// discipline as the real client. Powers `--demo` and the TUI smoke test.
-export class MockClient implements DovoClient {
-  onEvent: ((event: TaskEvent) => void) | null = null;
-  onConnection: ((connected: boolean) => void) | null = null;
-  onSync: (() => void) | null = null;
+// discipline as the real client. Serves `dovo serve --demo`, `dovo --demo`,
+// and the TUI smoke test - the app runs on it alone, no Dovo required.
+// Pacing values are arbitrary; their order is not.
+export class DemoClient implements RuntimeClient {
+  private sink = new SyncSink();
 
   private readonly projects: Project[] = [
     { id: "p-alpha", name: "website", path: "/srv/website" },
@@ -43,16 +48,22 @@ export class MockClient implements DovoClient {
     ]);
   }
 
+  subscribe(listener: SyncListener): Unsubscribe {
+    return this.sink.subscribe(listener);
+  }
+
   connect(): void {
-    this.onConnection?.(true);
+    this.publishConnection(true);
   }
 
   focusTask(_taskId: string | null): void {}
 
-  close(): void {
+  async close(): Promise<void> {
+    this.stopped = true;
     for (const timer of this.timers) clearTimeout(timer);
     this.timers = [];
-    this.onConnection?.(false);
+    this.publishConnection(false);
+    this.sink.clear();
   }
 
   async listProjects(): Promise<Project[]> {
@@ -85,7 +96,7 @@ export class MockClient implements DovoClient {
     const task = this.seedTask(
       id,
       input.projectId,
-      input.prompt.split("\n")[0]!.slice(0, 72),
+      input.prompt.split("\n")[0]!.slice(0, TASK_TITLE_MAX_CHARS),
       "running",
       input.providerId,
       Date.now(),
@@ -93,7 +104,8 @@ export class MockClient implements DovoClient {
     task.activeRunId = randomUUID();
     this.append(id, { kind: "user", id: randomUUID(), text: input.prompt });
     this.streamAgentReply(id, input.prompt);
-    this.at(50, () => this.onSync?.()); // the real runtime broadcasts a sync frame on create
+    // the real runtime broadcasts a sync frame shortly after create; mirror it
+    this.at(SYNC_HINT_AFTER_CREATE_MS, () => this.sink.publish({ type: "sync" }));
     return { ...task };
   }
 
@@ -157,7 +169,7 @@ export class MockClient implements DovoClient {
 
   private mustTask(id: string): TaskSummary {
     const task = this.tasks.get(id);
-    if (!task) throw new Error(`unknown task ${id}`);
+    if (!task) throw new DovoError(`unknown task ${id}`);
     return task;
   }
 
@@ -218,7 +230,12 @@ export class MockClient implements DovoClient {
     });
   }
 
+  private stopped = false;
+
   private at(ms: number, fn: () => void): void {
+    // A scripted turn must not resurrect activity after close(); its timers,
+    // subscriptions, and the event loop must all be finished.
+    if (this.stopped) return;
     this.timers.push(setTimeout(fn, ms));
   }
 
@@ -235,6 +252,16 @@ export class MockClient implements DovoClient {
   }
 
   private emit(event: TaskEvent): void {
-    this.onEvent?.(event);
+    this.sink.publish({ type: "event", event });
   }
+
+  private publishConnection(connected: boolean): void {
+    // After close() the sink is empty; publishing is harmless either way.
+    this.sink.publish({ type: "connection", connected });
+  }
+}
+
+/** Scripted runtime, no Dovo installation involved. */
+export function createDemoClient(): RuntimeClient {
+  return new DemoClient();
 }

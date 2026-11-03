@@ -1,11 +1,11 @@
-// Drives the real App + MockClient on a headless terminal and asserts on the
+// Drives the real App + DemoClient on a headless terminal and asserts on the
 // rendered screen buffer. Run: npm run smoke
 import xtermHeadless from "@xterm/headless";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Terminal } from "@earendil-works/pi-tui";
-import { MockClient } from "../src/api/mock-client.ts";
-import { App } from "../src/tui/app.ts";
-import { TaskListScreen } from "../src/tui/screens/tasklist.ts";
+import { createDemoClient } from "#demo/runtime.ts";
+import { App } from "#tui/app.ts";
+import { TaskListScreen } from "#tui/screens/tasklist.ts";
 
 const { Terminal: XtermHeadless } = xtermHeadless;
 
@@ -102,7 +102,7 @@ async function until(
 
 async function main(): Promise<void> {
   const terminal = new HeadlessTerminal();
-  const app = new App(new MockClient(), terminal);
+  const app = new App(createDemoClient(), terminal);
   await app.start(new TaskListScreen(app));
 
   // real keyboards deliver text and Enter as separate reads; pi-tui's StdinBuffer

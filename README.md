@@ -21,14 +21,17 @@ project and agent the runtime knows.
 ```sh
 git clone https://github.com/raulcorreia7/dovo-terminal
 cd dovo-terminal
-corepack enable && pnpm install    # pnpm version comes from packageManager
-pnpm link --global .               # installs the `dovo` command
-dovo --demo                        # full app against a scripted runtime, offline
+pnpm install    # deps only; pnpm's version comes from packageManager
+pnpm add -g .   # registers the dovo command globally
+dovo --local    # connect to the Dovo runtime on this machine
 ```
 
-That opens the task list immediately. `?` shows all keys; `ctrl+q` quits.
+`--local` uses the runtime in one process — no server hop. A dev runtime
+started from the dovo-studio source is discovered automatically; for anything
+else point at it explicitly under [Connecting](#connecting-to-a-real-dovo-runtime).
+No runtime nearby? See the whole app offline with `dovo --demo`.
 
-### With a real Dovo runtime
+### Connecting to a real Dovo runtime
 
 ```sh
 dovo add studio http://127.0.0.1:3000 --token <your-token>

@@ -5,26 +5,26 @@ import type { SyncFrame } from "dovo-terminal/protocol/sync.ts";
 import type { WebSocket } from "ws";
 
 export class SyncHub {
-  private sockets = new Set<WebSocket>();
+    private sockets = new Set<WebSocket>();
 
-  attach(socket: WebSocket): void {
-    this.sockets.add(socket);
-    socket.on("close", () => this.sockets.delete(socket));
-  }
-
-  broadcast(frame: SyncFrame): void {
-    const text = JSON.stringify(frame);
-    for (const socket of this.sockets) {
-      if (socket.readyState === socket.OPEN) {
-        socket.send(text);
-      }
+    attach(socket: WebSocket): void {
+        this.sockets.add(socket);
+        socket.on("close", () => this.sockets.delete(socket));
     }
-  }
 
-  close(): void {
-    for (const socket of this.sockets) {
-      socket.close();
+    broadcast(frame: SyncFrame): void {
+        const text = JSON.stringify(frame);
+        for (const socket of this.sockets) {
+            if (socket.readyState === socket.OPEN) {
+                socket.send(text);
+            }
+        }
     }
-    this.sockets.clear();
-  }
+
+    close(): void {
+        for (const socket of this.sockets) {
+            socket.close();
+        }
+        this.sockets.clear();
+    }
 }

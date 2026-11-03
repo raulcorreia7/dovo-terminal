@@ -1,70 +1,70 @@
 {
-  "name": "dovo-terminal",
-  "version": "0.1.0",
-  "description": "Terminal client for Dovo Studio: browse projects, run agent tasks, and answer approvals from the CLI, rendered with pi-tui differential rendering.",
-  "keywords": [
-    "terminal",
-    "tui",
-    "cli",
-    "agent",
-    "dovo"
-  ],
-  "license": "MIT",
-  "author": {
-    "name": "raulcorreia7",
-    "url": "https://github.com/raulcorreia7"
-  },
-  "maintainers": [
-    {
-      "name": "Dovo Studio",
-      "url": "https://github.com/dovocode/dovo-studio"
+    "name": "dovo-terminal",
+    "version": "0.1.0",
+    "description": "Terminal client for Dovo Studio: browse projects, run agent tasks, and answer approvals from the CLI, rendered with pi-tui differential rendering.",
+    "keywords": [
+        "terminal",
+        "tui",
+        "cli",
+        "agent",
+        "dovo"
+    ],
+    "license": "MIT",
+    "author": {
+        "name": "raulcorreia7",
+        "url": "https://github.com/raulcorreia7"
+    },
+    "maintainers": [
+        {
+            "name": "Dovo Studio",
+            "url": "https://github.com/dovocode/dovo-studio"
+        }
+    ],
+    "contributors": [
+        {
+            "name": "Dominic Vonk",
+            "url": "https://github.com/DominicVonk",
+            "description": "Dovo Studio — the runtime, protocol, and name"
+        }
+    ],
+    "type": "module",
+    "exports": {
+        "./*": "./src/*"
+    },
+    "bin": {
+        "dovo": "./src/cli.ts"
+    },
+    "files": [
+        "src",
+        "README.md"
+    ],
+    "scripts": {
+        "demo": "node src/cli.ts --demo",
+        "format": "biome check --write .",
+        "format:check": "biome ci .",
+        "lint": "biome lint .",
+        "serve": "node src/cli.ts serve --demo",
+        "smoke": "node test/smoke.ts",
+        "start": "node src/cli.ts",
+        "test": "node --test test/*.test.ts",
+        "test:runtime": "node test/runtime-contract.ts",
+        "typecheck": "tsc --noEmit",
+        "verify": "biome ci . && tsc --noEmit && node --test test/*.test.ts && node test/runtime-contract.ts && node test/smoke.ts"
+    },
+    "dependencies": {
+        "@earendil-works/pi-tui": "^1.5.0",
+        "ws": "^8.22.1",
+        "zod": "^4.6.7"
+    },
+    "devDependencies": {
+        "@biomejs/biome": "^2.6.4",
+        "@types/node": "^26.6.6",
+        "@types/ws": "^8.18.2",
+        "@xterm/headless": "^6.0.0",
+        "typescript": "^7.0.2"
+    },
+    "packageManager": "pnpm@12.16.1",
+    "engines": {
+        "node": ">=22.19"
     }
-  ],
-  "contributors": [
-    {
-      "name": "Dominic Vonk",
-      "url": "https://github.com/DominicVonk",
-      "description": "Dovo Studio — the runtime, protocol, and name"
-    }
-  ],
-  "type": "module",
-  "exports": {
-    "./*": "./src/*"
-  },
-  "bin": {
-    "dovo": "./src/cli.ts"
-  },
-  "files": [
-    "src",
-    "README.md"
-  ],
-  "scripts": {
-    "demo": "node src/cli.ts --demo",
-    "format": "biome check --write .",
-    "format:check": "biome ci .",
-    "lint": "biome lint .",
-    "serve": "node src/cli.ts serve --demo",
-    "smoke": "node test/smoke.ts",
-    "start": "node src/cli.ts",
-    "test": "node --test test/*.test.ts",
-    "test:runtime": "node test/runtime-contract.ts",
-    "typecheck": "tsc --noEmit",
-    "verify": "biome ci . && tsc --noEmit && node --test test/*.test.ts && node test/runtime-contract.ts && node test/smoke.ts"
-  },
-  "dependencies": {
-    "@earendil-works/pi-tui": "^1.5.0",
-    "ws": "^8.22.1",
-    "zod": "^4.6.7"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^2.6.4",
-    "@types/node": "^26.6.6",
-    "@types/ws": "^8.18.2",
-    "@xterm/headless": "^6.0.0",
-    "typescript": "^7.0.2"
-  },
-  "packageManager": "pnpm@12.16.1",
-  "engines": {
-    "node": ">=22.19"
-  }
 }

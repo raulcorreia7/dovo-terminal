@@ -15,18 +15,18 @@ export { UserItem } from "./items/user-item.ts";
 
 /** Builds the cached renderer for a new conversation item. */
 export function createItemView(item: ConversationItem): Component {
-  switch (item.kind) {
-    case "user":
-      return new UserItem(item.text);
-    case "assistant":
-      return new AssistantItem(item.text);
-    case "tool":
-      return new ToolItem(item.name, item.detail, item.state);
-    case "approval":
-      return new ApprovalItem(item.title, item.detail, item.options);
-    case "system":
-      return new SystemItem(item.text);
-    default:
-      return assertNever(item);
-  }
+    switch (item.kind) {
+        case "user":
+            return new UserItem(item.text);
+        case "assistant":
+            return new AssistantItem(item.text);
+        case "tool":
+            return new ToolItem(item.name, item.detail, item.state);
+        case "approval":
+            return new ApprovalItem(item.title, item.detail, item.options);
+        case "system":
+            return new SystemItem(item.text);
+        default:
+            return assertNever(item);
+    }
 }

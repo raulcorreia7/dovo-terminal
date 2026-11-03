@@ -4,27 +4,27 @@
 import type { ConnectionPhase } from "dovo-terminal/protocol/sync.ts";
 
 const ALLOWED_TRANSITIONS: Record<ConnectionPhase, readonly ConnectionPhase[]> = {
-  connecting: ["online", "offline"],
-  online: ["reconnecting", "offline"],
-  reconnecting: ["connecting", "online", "offline"],
-  // close() is terminal: a new connection means a new client.
-  offline: [],
+    connecting: ["online", "offline"],
+    online: ["reconnecting", "offline"],
+    reconnecting: ["connecting", "online", "offline"],
+    // close() is terminal: a new connection means a new client.
+    offline: [],
 };
 
 /** Small strict FSM shared by every RuntimeClient implementation. */
 export class ConnectionStateMachine {
-  private currentPhase: ConnectionPhase = "connecting";
+    private currentPhase: ConnectionPhase = "connecting";
 
-  get phase(): ConnectionPhase {
-    return this.currentPhase;
-  }
-
-  /** Returns false (and changes nothing) for an illegal transition. */
-  transition(to: ConnectionPhase): boolean {
-    if (!ALLOWED_TRANSITIONS[this.currentPhase].includes(to)) {
-      return false;
+    get phase(): ConnectionPhase {
+        return this.currentPhase;
     }
-    this.currentPhase = to;
-    return true;
-  }
+
+    /** Returns false (and changes nothing) for an illegal transition. */
+    transition(to: ConnectionPhase): boolean {
+        if (!ALLOWED_TRANSITIONS[this.currentPhase].includes(to)) {
+            return false;
+        }
+        this.currentPhase = to;
+        return true;
+    }
 }

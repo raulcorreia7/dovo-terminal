@@ -1,173 +1,173 @@
 {
-  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+    "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
 
-  // Baseline: every stable rule, not just recommended. Nursery stays off:
-  // unstable rules churn opinions without catching new bugs.
-  "linter": {
-    "enabled": true,
-    "rules": {
-      "preset": "all",
+    // Baseline: every stable rule, not just recommended. Nursery stays off:
+    // unstable rules churn opinions without catching new bugs.
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "preset": "all",
 
-      // --- off: wrong platform. This is a Node CLI; browser-oriented rules ---
-      // would ban the module system it runs on.
-      "correctness": {
-        "noNodejsModules": "off",
-        "noProcessGlobal": "off"
-      },
-      "style": {
-        // Reading process.env is config.ts's whole job; typed env is overkill.
-        "noProcessEnv": "off",
-        // --- off: pure taste. None of these catch bugs; they restyle code. ---
-        "noMagicNumbers": "off",
-        "noTernary": "off",
-        "noContinue": "off",
-        "noIncrementDecrement": "off",
-        "useDestructuring": "off",
-        "useExportsLast": "off",
-        "useReadonlyClassProperties": "off",
-        "useThisInClassMethods": "off",
-        "useConsistentMethodSignatures": "off",
-        // State fields (`private stopped: boolean = false`) need their
-        // annotation: without it, noUnnecessaryConditions' inference treats
-        // the initializer as the literal type and calls `if (this.stopped)`
-        // dead code. The pair is unsatisfiable; explicit types win.
-        "noInferrableTypes": "off"
-      },
-      "complexity": {
-        // `: void` return annotations are idiomatic TypeScript; the rule bans
-        // the notation, not the mistake.
-        "noVoid": "off",
-        // Bracket access is required: frame payloads are index-signature types
-        // and tsconfig's noPropertyAccessFromIndexSignature demands it.
-        "useLiteralKeys": "off"
-      },
-      "performance": {},
-      "suspicious": {
-        // Assertions live in shared wait/verify helpers on purpose; the rule
-        // targets framework `expect()` locality, not node:test's assert.
-        "noMisplacedAssertion": "off"
-      }
+            // --- off: wrong platform. This is a Node CLI; browser-oriented rules ---
+            // would ban the module system it runs on.
+            "correctness": {
+                "noNodejsModules": "off",
+                "noProcessGlobal": "off"
+            },
+            "style": {
+                // Reading process.env is config.ts's whole job; typed env is overkill.
+                "noProcessEnv": "off",
+                // --- off: pure taste. None of these catch bugs; they restyle code. ---
+                "noMagicNumbers": "off",
+                "noTernary": "off",
+                "noContinue": "off",
+                "noIncrementDecrement": "off",
+                "useDestructuring": "off",
+                "useExportsLast": "off",
+                "useReadonlyClassProperties": "off",
+                "useThisInClassMethods": "off",
+                "useConsistentMethodSignatures": "off",
+                // State fields (`private stopped: boolean = false`) need their
+                // annotation: without it, noUnnecessaryConditions' inference treats
+                // the initializer as the literal type and calls `if (this.stopped)`
+                // dead code. The pair is unsatisfiable; explicit types win.
+                "noInferrableTypes": "off"
+            },
+            "complexity": {
+                // `: void` return annotations are idiomatic TypeScript; the rule bans
+                // the notation, not the mistake.
+                "noVoid": "off",
+                // Bracket access is required: frame payloads are index-signature types
+                // and tsconfig's noPropertyAccessFromIndexSignature demands it.
+                "useLiteralKeys": "off"
+            },
+            "performance": {},
+            "suspicious": {
+                // Assertions live in shared wait/verify helpers on purpose; the rule
+                // targets framework `expect()` locality, not node:test's assert.
+                "noMisplacedAssertion": "off"
+            }
+        },
+        // Node's own test runner is used, not vitest/jest; and no frontend
+        // framework is in this project - its rule domains all misfire on plain TS.
+        // Only project-wide and type-aware analysis are enabled.
+        "domains": {
+            "astro": "none",
+            "drizzle": "none",
+            "next": "none",
+            "playwright": "none",
+            "project": "all",
+            "qwik": "none",
+            "react": "none",
+            "reactNative": "none",
+            "solid": "none",
+            "svelte": "none",
+            "tailwind": "none",
+            "tanstackQuery": "none",
+            "test": "none",
+            "turborepo": "none",
+            "types": "all",
+            "vue": "none"
+        }
     },
-    // Node's own test runner is used, not vitest/jest; and no frontend
-    // framework is in this project - its rule domains all misfire on plain TS.
-    // Only project-wide and type-aware analysis are enabled.
-    "domains": {
-      "astro": "none",
-      "drizzle": "none",
-      "next": "none",
-      "playwright": "none",
-      "project": "all",
-      "qwik": "none",
-      "react": "none",
-      "reactNative": "none",
-      "solid": "none",
-      "svelte": "none",
-      "tailwind": "none",
-      "tanstackQuery": "none",
-      "test": "none",
-      "turborepo": "none",
-      "types": "all",
-      "vue": "none"
+
+    // Import organization yes; alphabetical key sorting no: tsconfig option
+    // order, fixture shapes, and interface member order carry meaning here.
+    "assist": {
+        "actions": {
+            "preset": "all",
+            "source": {
+                "useSortedKeys": "off",
+                "useSortedInterfaceMembers": "off"
+            }
+        }
+    },
+
+    "overrides": [
+        {
+            // Screens navigate to each other; the graph is cyclic by design and the
+            // loads are dynamic so no evaluation order is coupled.
+            "includes": ["src/tui/screens/**"],
+            "linter": {
+                "rules": {
+                    "suspicious": { "noImportCycles": "off" }
+                }
+            }
+        },
+        {
+            // Test code: sleep-and-retry waiters must await inside loops, and
+            // assertions belong in the shared helpers. Scenarios read linearly by
+            // design; splitting a contract walkthrough into snippets hides bugs.
+            "includes": ["test/**"],
+            "linter": {
+                "rules": {
+                    "performance": { "noAwaitInLoops": "off" },
+                    "style": { "noExcessiveLinesPerFile": "off" },
+                    "complexity": {
+                        "noExcessiveCognitiveComplexity": "off",
+                        "noExcessiveLinesPerFunction": "off"
+                    }
+                }
+            }
+        },
+        {
+            // The demo runtime is a synchronous in-memory stand-in behind the
+            // Promise-shaped RuntimeClient interface; sync methods returning
+            // Promises without await are the point.
+            "includes": ["src/client/demo.ts"],
+            "linter": {
+                "rules": {
+                    "suspicious": { "useAwait": "off" }
+                }
+            }
+        },
+        {
+            // Component no-ops: pi-tui's Component contract requires invalidate()
+            // and the headless-terminal writer needs do-nothing members; upstream
+            // pi-tui itself ships `invalidate(): void {}`.
+            "includes": ["src/tui/items/**", "src/tui/line.ts", "test/smoke.ts"],
+            "linter": {
+                "rules": {
+                    "suspicious": { "noEmptyBlockStatements": "off" }
+                }
+            }
+        },
+        {
+            // The items barrel is the stable import surface for item views; one
+            // class per file is required elsewhere, so re-exports are the point.
+            "includes": ["src/tui/items.ts"],
+            "linter": {
+                "rules": {
+                    "performance": { "noBarrelFile": "off" }
+                }
+            }
+        },
+        {
+            // @xterm/headless ships no "exports" map; Node and tsc resolve the
+            // bare specifier, biome's module resolver cannot.
+            "includes": ["test/smoke.ts", "test/smoke-terminal.ts"],
+            "linter": {
+                "rules": {
+                    "correctness": { "noUnresolvedImports": "off" }
+                }
+            }
+        }
+    ],
+
+    "formatter": {
+        "enabled": true,
+        "indentStyle": "space",
+        "indentWidth": 4,
+        "lineWidth": 100
+    },
+
+    "vcs": {
+        "enabled": true,
+        "clientKind": "git",
+        "useIgnoreFile": true
+    },
+
+    "files": {
+        "includes": ["**", "!!node_modules", "!!package-lock.json"]
     }
-  },
-
-  // Import organization yes; alphabetical key sorting no: tsconfig option
-  // order, fixture shapes, and interface member order carry meaning here.
-  "assist": {
-    "actions": {
-      "preset": "all",
-      "source": {
-        "useSortedKeys": "off",
-        "useSortedInterfaceMembers": "off"
-      }
-    }
-  },
-
-  "overrides": [
-    {
-      // Screens navigate to each other; the graph is cyclic by design and the
-      // loads are dynamic so no evaluation order is coupled.
-      "includes": ["src/tui/screens/**"],
-      "linter": {
-        "rules": {
-          "suspicious": { "noImportCycles": "off" }
-        }
-      }
-    },
-    {
-      // Test code: sleep-and-retry waiters must await inside loops, and
-      // assertions belong in the shared helpers. Scenarios read linearly by
-      // design; splitting a contract walkthrough into snippets hides bugs.
-      "includes": ["test/**"],
-      "linter": {
-        "rules": {
-          "performance": { "noAwaitInLoops": "off" },
-          "style": { "noExcessiveLinesPerFile": "off" },
-          "complexity": {
-            "noExcessiveCognitiveComplexity": "off",
-            "noExcessiveLinesPerFunction": "off"
-          }
-        }
-      }
-    },
-    {
-      // The demo runtime is a synchronous in-memory stand-in behind the
-      // Promise-shaped RuntimeClient interface; sync methods returning
-      // Promises without await are the point.
-      "includes": ["src/client/demo.ts"],
-      "linter": {
-        "rules": {
-          "suspicious": { "useAwait": "off" }
-        }
-      }
-    },
-    {
-      // Component no-ops: pi-tui's Component contract requires invalidate()
-      // and the headless-terminal writer needs do-nothing members; upstream
-      // pi-tui itself ships `invalidate(): void {}`.
-      "includes": ["src/tui/items/**", "src/tui/line.ts", "test/smoke.ts"],
-      "linter": {
-        "rules": {
-          "suspicious": { "noEmptyBlockStatements": "off" }
-        }
-      }
-    },
-    {
-      // The items barrel is the stable import surface for item views; one
-      // class per file is required elsewhere, so re-exports are the point.
-      "includes": ["src/tui/items.ts"],
-      "linter": {
-        "rules": {
-          "performance": { "noBarrelFile": "off" }
-        }
-      }
-    },
-    {
-      // @xterm/headless ships no "exports" map; Node and tsc resolve the
-      // bare specifier, biome's module resolver cannot.
-      "includes": ["test/smoke.ts", "test/smoke-terminal.ts"],
-      "linter": {
-        "rules": {
-          "correctness": { "noUnresolvedImports": "off" }
-        }
-      }
-    }
-  ],
-
-  "formatter": {
-    "enabled": true,
-    "indentStyle": "space",
-    "indentWidth": 2,
-    "lineWidth": 100
-  },
-
-  "vcs": {
-    "enabled": true,
-    "clientKind": "git",
-    "useIgnoreFile": true
-  },
-
-  "files": {
-    "includes": ["**", "!!node_modules", "!!package-lock.json"]
-  }
 }

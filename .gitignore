@@ -8,6 +8,8 @@ dist/
 # logs
 *.log
 npm-debug.log*
+pnpm-debug.log*
+.pnpm-store/
 
 # local runtime data the server may write here
 .dovo/

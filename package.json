@@ -63,6 +63,7 @@
     "@xterm/headless": "^6.0.0",
     "typescript": "^7.0.2"
   },
+  "packageManager": "pnpm@12.16.1",
   "engines": {
     "node": ">=22.19"
   }

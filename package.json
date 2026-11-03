@@ -11,6 +11,12 @@
   ],
   "license": "ISC",
   "author": "",
+  "maintainers": [
+    {
+      "name": "Dovo Studio",
+      "url": "https://github.com/dovocode/dovo-studio"
+    }
+  ],
   "type": "module",
   "exports": {
     "./*": "./src/*"

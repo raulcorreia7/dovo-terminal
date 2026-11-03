@@ -158,3 +158,12 @@ npm run smoke         # drives the real TUI headless against a demo runtime
 npm run test:runtime  # checks wire traffic against a fake Dovo server
 npm test              # node:test suites: local server protocol + client/server integration
 ```
+
+## Credits and maintainer
+
+Dovo Studio — the runtime, the protocol this client speaks, and the Dovo name
+— belongs to the [dovocode/dovo-studio](https://github.com/dovocode/dovo-studio)
+project, which maintains it. This repository is an independent terminal client
+for that runtime; it is not a fork and carries no Dovo source code. Terminal
+rendering (differential, flicker-free) is provided by
+[pi-tui](https://github.com/earendil-works/pi/tree/main/packages/tui).

@@ -1,4 +1,4 @@
-// One behavioral suite, two routes: { via: "direct" } and { via: "loopback" }.
+// One behavioral suite, two routes: { via: "local" } and { via: "loopback" }.
 // Same assertions, same backend - proof that nothing in the RuntimeClient
 // contract leaks the presence or absence of the local server. Closing the
 // session must leave nothing running: each test asserts it resolves.
@@ -13,7 +13,7 @@ import type { SyncFrame } from "../src/protocol/sync.ts";
 import { TaskStatusSchema } from "../src/protocol/workspace.ts";
 
 const ROUTES: Record<string, RuntimeRoute> = {
-  direct: { via: "direct" },
+  local: { via: "local" },
   loopback: { via: "loopback" },
 };
 

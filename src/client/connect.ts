@@ -1,7 +1,7 @@
 // Deployment choice in one place. Everything above this line only ever sees a
 // RuntimeClient: whether the loopback server hop exists is invisible here.
 //
-//   direct   -> the backend object itself (tests, --direct debugging)
+//   local    -> the backend object itself (tests, --local debugging)
 //   loopback -> REST + /ws/sync through the local runtime server (default)
 //
 // `dovo serve` splits the same seam from the other side: it runs the server
@@ -16,7 +16,7 @@ export interface RuntimeSession {
 }
 
 export type RuntimeRoute =
-  | { via: "direct" }
+  | { via: "local" }
   | { via: "loopback"; hostname?: string; port?: number }
   | { via: "server"; url: string };
 
@@ -30,7 +30,7 @@ export async function openRuntime(
     return { client, close: () => client.close() };
   }
   if (!backend) throw new Error("this runtime route needs a backend");
-  if (route.via === "direct") {
+  if (route.via === "local") {
     return { client: backend, close: () => backend.close() };
   }
   const server = await startRuntimeServer({

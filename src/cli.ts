@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Wiring only: choose a backend (Dovo | demo), choose a route (direct |
+// Wiring only: choose a backend (Dovo | demo), choose a route (local |
 // loopback | existing server), hand the TUI a RuntimeClient. No mode reaches
 // past the interface.
 import { once } from "node:events";
@@ -30,7 +30,7 @@ backend options (pick one source):
 
 route options (TUI runs the same either way):
   --server <url>     use an already-running "dovo serve" instance
-  --direct           no local server; the runtime is used in-process
+  --local           no local server; the runtime is used in-process
   -h, --help         this message`;
 
 interface Options {
@@ -40,7 +40,7 @@ interface Options {
   profile?: string;
   demo?: boolean;
   server?: string;
-  direct?: boolean;
+  local?: boolean;
   port?: string;
 }
 
@@ -74,7 +74,7 @@ async function runTerminal(values: Options): Promise<void> {
 
 function routeFor(values: Options) {
   if (values.server) return { via: "server", url: values.server } as const;
-  if (values.direct) return { via: "direct" } as const;
+  if (values.local) return { via: "local" } as const;
   return { via: "loopback" } as const;
 }
 
@@ -87,7 +87,7 @@ async function main(): Promise<void> {
       profile: { type: "string" },
       demo: { type: "boolean" },
       server: { type: "string" },
-      direct: { type: "boolean" },
+      local: { type: "boolean" },
       port: { type: "string" },
       help: { type: "boolean", short: "h" },
     },

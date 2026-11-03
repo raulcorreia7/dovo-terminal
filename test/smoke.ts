@@ -3,6 +3,7 @@
 import xtermHeadless from "@xterm/headless";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Terminal } from "@earendil-works/pi-tui";
+import { openRuntime } from "../src/client/connect.ts";
 import { createDemoClient } from "../src/client/demo.ts";
 import { App } from "../src/tui/app.ts";
 import { TaskListScreen } from "../src/tui/screens/tasklist.ts";
@@ -102,7 +103,9 @@ async function until(
 
 async function main(): Promise<void> {
   const terminal = new HeadlessTerminal();
-  const app = new App(createDemoClient(), terminal);
+  // same route `dovo --demo` takes: embedded server + loopback client
+  const session = await openRuntime(createDemoClient(), { via: "loopback" });
+  const app = new App(session.client, terminal);
   await app.start(new TaskListScreen(app));
 
   // real keyboards deliver text and Enter as separate reads; pi-tui's StdinBuffer
@@ -180,9 +183,11 @@ async function main(): Promise<void> {
   if (failures.length > 0) {
     process.stdout.write(`\n--- final screen ---\n${terminal.screen().join("\n")}\n`);
     process.stdout.write(`\n${failures.length} failures\n`);
+    await session.close();
     process.exit(1);
   }
   process.stdout.write("\nall smoke checks passed\n");
+  await session.close();
   process.exit(0);
 }
 

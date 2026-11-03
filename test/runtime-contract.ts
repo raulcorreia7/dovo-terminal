@@ -85,6 +85,7 @@ interface Seen {
     activity?: Record<string, unknown> | undefined;
     ticket?: string | undefined;
 }
+
 const seen: Seen = {};
 const flags: { rejectNextCreate: boolean } = { rejectNextCreate: false };
 
@@ -321,19 +322,23 @@ client.subscribe((frame) => {
 });
 
 const failures: string[] = [];
+
 function resultMarker(passed: boolean): string {
     if (passed) {
         return "ok  ";
     }
     return "FAIL";
 }
+
 function expect(condition: boolean, label: string): void {
     process.stdout.write(`${resultMarker(condition)}  ${label}\n`);
     if (!condition) {
         failures.push(label);
     }
 }
+
 const wait = (ms: number) => delay(ms) as Promise<void>;
+
 const waitFor = async (predicate: () => boolean, ms = 4000): Promise<boolean> => {
     const deadline = Date.now() + ms;
     while (Date.now() < deadline) {

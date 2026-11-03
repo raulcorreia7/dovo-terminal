@@ -82,6 +82,7 @@ export class TaskListScreen implements Screen {
             this.root.addChild(empty, { grow: 1, basis: 0 });
             return { focus: empty };
         }
+
         const list = this.list;
         if (!list) {
             // A refresh owns list construction; before the first one there is nothing to show.

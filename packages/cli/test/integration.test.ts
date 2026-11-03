@@ -5,13 +5,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { openRuntime, type RuntimeRoute } from "dovo-terminal/client/connect.ts";
-import { createDemoClient } from "dovo-terminal/client/demo.ts";
-import type { RuntimeClient } from "dovo-terminal/client/runtime-client.ts";
-import { guard } from "dovo-terminal/protocol/guard.ts";
-import type { ConnectionPhase, SyncFrame } from "dovo-terminal/protocol/sync.ts";
-import { type Project, TaskStatusSchema } from "dovo-terminal/protocol/workspace.ts";
-import { type RunningRuntimeServer, startRuntimeServer } from "dovo-terminal/server/index.ts";
+import { createDemoClient } from "@dovo-terminal/client/demo.ts";
+import { guard } from "@dovo-terminal/protocol/guard.ts";
+import type { RuntimeClient } from "@dovo-terminal/protocol/runtime-client.ts";
+import type { ConnectionPhase, SyncFrame } from "@dovo-terminal/protocol/sync.ts";
+import { type Project, TaskStatusSchema } from "@dovo-terminal/protocol/workspace.ts";
+import { type RunningRuntimeServer, startRuntimeServer } from "@dovo-terminal/server/index.ts";
+import { openRuntime, type RuntimeRoute } from "../src/connect.ts";
 
 const ROUTES: Record<string, RuntimeRoute> = {
   local: { via: "local" },

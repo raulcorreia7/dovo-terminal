@@ -1,6 +1,6 @@
+import { assertNever } from "@dovo-terminal/protocol/errors.ts";
+import type { ConversationItem } from "@dovo-terminal/protocol/workspace.ts";
 import { type Component, Container } from "@earendil-works/pi-tui";
-import { assertNever } from "dovo-terminal/protocol/errors.ts";
-import type { ConversationItem } from "../protocol/workspace.ts";
 import {
   ApprovalItem,
   AssistantItem,

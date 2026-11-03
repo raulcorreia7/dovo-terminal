@@ -1,32 +1,40 @@
 import { randomUUID } from "node:crypto";
+import { ConnectionStateMachine } from "@dovo-terminal/protocol/connection-state.ts";
+import { DovoError } from "@dovo-terminal/protocol/errors.ts";
+import type {
+  ArchiveStore,
+  PortDirectory,
+  RuntimeClient,
+} from "@dovo-terminal/protocol/runtime-client.ts";
+import type {
+  ConnectionPhase,
+  SyncListener,
+  TaskEvent,
+  Unsubscribe,
+} from "@dovo-terminal/protocol/sync.ts";
+import { SyncSink } from "@dovo-terminal/protocol/sync-sink.ts";
+import type {
+  AgentProvider,
+  ConversationItem,
+  CreateTaskInput,
+  ModelOption,
+  Project,
+  TaskHistory,
+  TaskSummary,
+} from "@dovo-terminal/protocol/workspace.ts";
+import { TASK_TITLE_MAX_CHARS } from "@dovo-terminal/protocol/workspace.ts";
+import { DemoDevices } from "./demo-devices.ts";
 import {
   DEMO_APPROVAL,
+  DEMO_MODELS,
+  DEMO_PORTS,
   DEMO_PROJECTS,
   DEMO_PROVIDERS,
   DEMO_SEED_ITEMS,
   DEMO_SEED_TASK,
   planReply,
   type ReplyFrame,
-} from "dovo-terminal/client/demo-script.ts";
-import type { RuntimeClient } from "dovo-terminal/client/runtime-client.ts";
-import { ConnectionStateMachine } from "dovo-terminal/protocol/connection-state.ts";
-import { DovoError } from "dovo-terminal/protocol/errors.ts";
-import type {
-  ConnectionPhase,
-  SyncListener,
-  TaskEvent,
-  Unsubscribe,
-} from "dovo-terminal/protocol/sync.ts";
-import { SyncSink } from "dovo-terminal/protocol/sync-sink.ts";
-import type {
-  AgentProvider,
-  ConversationItem,
-  CreateTaskInput,
-  Project,
-  TaskHistory,
-  TaskSummary,
-} from "dovo-terminal/protocol/workspace.ts";
-import { TASK_TITLE_MAX_CHARS } from "dovo-terminal/protocol/workspace.ts";
+} from "./demo-script.ts";
 
 const SYNC_HINT_AFTER_CREATE_MS = 50;
 
@@ -35,6 +43,11 @@ export class DemoClient implements RuntimeClient {
   private sink = new SyncSink();
 
   private readonly projects: Project[] = DEMO_PROJECTS;
+  readonly devices = new DemoDevices();
+  readonly ports: PortDirectory = { list: async () => DEMO_PORTS.map((port) => ({ ...port })) };
+  readonly archive: ArchiveStore = {
+    list: async () => [...this.tasks.values()].filter((task) => this.archived.has(task.id)),
+  };
   private readonly providers: AgentProvider[] = DEMO_PROVIDERS;
   private tasks = new Map<string, TaskSummary>();
   private items = new Map<string, ConversationItem[]>();
@@ -81,6 +94,10 @@ export class DemoClient implements RuntimeClient {
 
   async listProviders(): Promise<AgentProvider[]> {
     return [...this.providers];
+  }
+
+  async listModels(providerId: string): Promise<ModelOption[]> {
+    return [...(DEMO_MODELS[providerId] ?? [])];
   }
 
   async getTaskHistory(taskId: string): Promise<TaskHistory> {

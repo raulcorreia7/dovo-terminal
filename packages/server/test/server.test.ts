@@ -3,17 +3,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { createDemoClient } from "dovo-terminal/client/demo.ts";
-import { guard } from "dovo-terminal/protocol/guard.ts";
-import { ENDPOINTS, syncUrl } from "dovo-terminal/protocol/http.ts";
-import { type ConnectionPhase, SyncFrameSchema } from "dovo-terminal/protocol/sync.ts";
+import { createDemoClient } from "@dovo-terminal/client/demo.ts";
+import { guard } from "@dovo-terminal/protocol/guard.ts";
+import { ENDPOINTS, syncUrl } from "@dovo-terminal/protocol/http.ts";
+import { type ConnectionPhase, SyncFrameSchema } from "@dovo-terminal/protocol/sync.ts";
 import {
+  ModelOptionSchema,
   ProjectSchema,
   TaskHistorySchema,
   TaskSummarySchema,
-} from "dovo-terminal/protocol/workspace.ts";
-import { type RunningRuntimeServer, startRuntimeServer } from "dovo-terminal/server/index.ts";
+} from "@dovo-terminal/protocol/workspace.ts";
 import { WebSocket } from "ws";
+import { type RunningRuntimeServer, startRuntimeServer } from "../src/index.ts";
 
 const ProjectListSchema = ProjectSchema.array();
 const TaskSummaryListSchema = TaskSummarySchema.array();
@@ -47,6 +48,35 @@ test("health answers without auth or backend calls", async () => {
   const response = await fetch(server.url + ENDPOINTS.health);
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { status: "ok" });
+});
+
+test("models are listed per provider, and a provider without a catalog has none", async () => {
+  const server = await start();
+  const withCatalog = await fetch(`${server.url}${ENDPOINTS.models}?provider=opencode`);
+  const models = guard(ModelOptionSchema.array(), await withCatalog.json());
+  assert.ok(models.length > 1);
+
+  const without = await fetch(`${server.url}${ENDPOINTS.models}?provider=codex`);
+  assert.deepEqual(await without.json(), []);
+
+  const missing = await fetch(`${server.url}${ENDPOINTS.models}`);
+  assert.equal(missing.status, 400);
+});
+
+test("an ability the backend lacks is a 501, not an empty answer", async () => {
+  const bare = Object.create(createDemoClient(), {
+    archive: { value: undefined },
+    devices: { value: undefined },
+    ports: { value: undefined },
+  });
+  const server = track(await startRuntimeServer({ client: bare, port: 0 }));
+
+  for (const path of [ENDPOINTS.archived, ENDPOINTS.devices, ENDPOINTS.ports]) {
+    const response = await fetch(server.url + path);
+
+    assert.equal(response.status, 501, path);
+  }
+  assert.equal((await fetch(server.url + ENDPOINTS.projects)).status, 200);
 });
 
 test("reads map onto the RuntimeClient interface", async () => {

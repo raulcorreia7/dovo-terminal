@@ -4,23 +4,65 @@ import {
   parseColor,
   type SelectListTheme,
   styleText,
+  type TerminalColorScheme,
 } from "@earendil-works/pi-tui";
+import { DEFAULT_DARK, DEFAULT_LIGHT, type Palette, type ThemeBook } from "./palette.ts";
+import { DOVO_PALETTE, PRESETS } from "./presets.ts";
 
-// Single palette for the whole app. `t()` takes palette VALUES (hex strings);
-// import `colors` for named references. Markdown/select-list themes are plain
-// style functions by pi-tui design.
-export const colors = {
-  text: "#e6e1d8",
-  muted: "#8b8578",
-  dim: "#6a655b",
-  accent: "#e8a04c",
-  user: "#7fb4d3",
-  ok: "#93b77a",
-  warn: "#e8c05c",
-  error: "#d46a5c",
-  border: "#4a463f",
-  code: "#c9b98a",
-};
+// The live palette. Every style below reads it at call time, so applying a
+// theme restyles anything built afterwards; screens rebuild to pick it up.
+// `t()` takes palette VALUES (hex strings); import `colors` for named references.
+export const colors: Palette = { ...DOVO_PALETTE };
+
+export interface ThemeEntry {
+  readonly id: string;
+  readonly label: string;
+  readonly palette: Palette;
+}
+
+/** Presets first, then the user's own; a user theme replaces a preset of the same id. */
+export function listThemes(custom: ThemeBook): ThemeEntry[] {
+  const presets = Object.entries(PRESETS)
+    .filter(([id]) => !(id in custom))
+    .map(([id, preset]) => ({ id, label: preset.label, palette: preset.palette }));
+  const own = Object.entries(custom).map(([id, palette]) => ({ id, label: id, palette }));
+
+  return [...presets, ...own];
+}
+
+/** Every theme as a lookup, the base set a user theme file can `extends`. */
+export function themeBook(custom: ThemeBook): ThemeBook {
+  return Object.fromEntries(listThemes(custom).map((entry) => [entry.id, entry.palette]));
+}
+
+/** "auto" (or nothing) follows the terminal's light/dark scheme. */
+export function resolveThemeId(requested: string | undefined, scheme: TerminalColorScheme): string {
+  if (requested && requested !== "auto") {
+    return requested;
+  }
+  if (scheme === "light") {
+    return DEFAULT_LIGHT;
+  }
+
+  return DEFAULT_DARK;
+}
+
+/** Light or dark, judged by the relative luminance of the terminal background. */
+export function schemeOfBackground(rgb: { r: number; g: number; b: number }): TerminalColorScheme {
+  const luminance = 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b;
+  if (luminance > 128) {
+    return "light";
+  }
+
+  return "dark";
+}
+
+export function applyPalette(palette: Palette): void {
+  Object.assign(colors, palette);
+}
+
+// NO_COLOR (https://no-color.org): drop colour, keep bold/italic/underline.
+const noColor = (process.env["NO_COLOR"] ?? "") !== "";
 
 type StyleAttrs = Partial<{
   bold: boolean;
@@ -33,7 +75,9 @@ export function t(text: string, color?: string, attrs: StyleAttrs = {}): string 
   if (!color) {
     return text;
   }
-  return styleText(text, { fg: parseColor(color), ...attrs }, getTerminalColorMode());
+  const style = noColor ? attrs : { fg: parseColor(color), ...attrs };
+
+  return styleText(text, style, getTerminalColorMode());
 }
 
 export const markdownTheme: MarkdownTheme = {

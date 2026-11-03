@@ -6,7 +6,7 @@
 // discipline as the real client. Serves `dovo serve --demo`, `dovo --demo`,
 // and the TUI smoke test - the app runs on it alone, no Dovo required.
 
-import type { ConversationItem } from "dovo-terminal/protocol/workspace.ts";
+import type { ConversationItem } from "@dovo-terminal/protocol/workspace.ts";
 
 export const DEMO_PROJECTS = [
   { id: "p-alpha", name: "website", path: "/srv/website" },
@@ -16,7 +16,41 @@ export const DEMO_PROJECTS = [
 export const DEMO_PROVIDERS = [
   { id: "codex", label: "Codex" },
   { id: "claude", label: "Claude" },
+  { id: "opencode", label: "OpenCode" },
+  { id: "pi", label: "Pi" },
 ];
+
+/** One dev server the demo project appears to be running. */
+export const DEMO_PORTS = [
+  {
+    port: 3000,
+    command: "vite",
+    folder: "/srv/website",
+    projectId: "p-alpha",
+    pid: 4242,
+    started: "demo",
+  },
+];
+
+export const DEMO_INVITE_CODE = "48291736";
+
+/** One paired laptop and one phone waiting for approval. */
+export const DEMO_DEVICES = [
+  { id: "d-laptop", name: "Work laptop", pending: false },
+  { id: "d-phone", name: "Phone", pending: true },
+];
+
+/** Only some harnesses offer a choice, as with a real runtime: the rest run their one model. */
+export const DEMO_MODELS: Readonly<Record<string, readonly { id: string; label: string }[]>> = {
+  opencode: [
+    { id: "demo/fast", label: "Fast" },
+    { id: "demo/deep", label: "Deep" },
+  ],
+  pi: [
+    { id: "demo/mini", label: "Mini" },
+    { id: "demo/max", label: "Max" },
+  ],
+};
 
 /** The one pre-seeded conversation the list and history show on start. */
 const DEMO_SEED_TASK_ID = "t-old";

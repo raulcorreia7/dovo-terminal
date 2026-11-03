@@ -1,0 +1,22 @@
+{
+  "name": "@dovo-terminal/orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Takes a goal, plans it into steps, and delegates the steps to A2A workers.",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@a2a-js/sdk": "^1.3.0",
+    "@dovo-terminal/a2a": "workspace:*",
+    "@dovo-terminal/protocol": "workspace:*",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@dovo-terminal/client": "workspace:*"
+  }
+}

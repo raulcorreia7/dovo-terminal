@@ -4,67 +4,61 @@
 // past the interface.
 import { once } from "node:events";
 import { parseArgs } from "node:util";
-import { openRuntime, type RuntimeRoute } from "dovo-terminal/client/connect.ts";
-import { createDemoClient } from "dovo-terminal/client/demo.ts";
-import { createDovoClient } from "dovo-terminal/client/dovo.ts";
-import type { RuntimeClient } from "dovo-terminal/client/runtime-client.ts";
-import {
-  DEFAULT_PRODUCTION_ORIGIN,
-  loadConfig,
-  type RuntimeProfile,
-  resolveRuntime,
-  saveConfig,
-} from "dovo-terminal/config.ts";
-import { errorMessage } from "dovo-terminal/protocol/errors.ts";
-import { startRuntimeServer } from "dovo-terminal/server/index.ts";
-import { App } from "dovo-terminal/tui/app.ts";
-import { TaskListScreen } from "dovo-terminal/tui/screens/tasklist.ts";
+import { startAgentServer } from "@dovo-terminal/a2a/server.ts";
+import type { Machine } from "@dovo-terminal/client/federated.ts";
+import { errorMessage } from "@dovo-terminal/protocol/errors.ts";
+import type { RuntimeClient } from "@dovo-terminal/protocol/runtime-client.ts";
+import { startRuntimeServer } from "@dovo-terminal/server/index.ts";
+import { App } from "@dovo-terminal/tui/app.ts";
+import { isListAction, type KeyOverrides } from "@dovo-terminal/tui/keys.ts";
+import { TaskListScreen } from "@dovo-terminal/tui/screens/tasklist.ts";
+import { openBackend } from "./backend.ts";
+import { addRuntime, addToken, runDoctor, runPrune, showA2aToken } from "./commands.ts";
+import { a2aTokenFor, dataPath, loadConfig, saveConfig, themesDir } from "./config.ts";
+import { openRuntime, type RuntimeRoute } from "./connect.ts";
+import { runChecks, targetsFor } from "./doctor.ts";
+import { createGithubNotes } from "./github.ts";
+import { isSafeWebhook, startTeamsNotifier } from "./notify.ts";
+import type { Options } from "./options.ts";
+import { runOrchestrate } from "./orchestrate.ts";
+import { openService } from "./services.ts";
+import { profileFor, shellForProject } from "./shell.ts";
+import { loadUserThemes } from "./themes.ts";
 
 const DEFAULT_SERVE_PORT = 8790;
+const DEFAULT_A2A_PORT = 8791;
 
 const USAGE = `dovo-terminal — Dovo Studio in the terminal
 
 usage: dovo [options]
        dovo serve [--port <n>] [backend options]   run only the local runtime server
-       dovo add <name> <url> [--token <token>]
+       dovo orchestrate [port] [--worker <name> | --planner <profile>]   spread goals over the A2A workers
+       dovo a2a-token [--rotate]       show (or replace) this worker's A2A access token
+       dovo doctor [backend options]   check every machine; exit 1 if anything fails
+       dovo prune --older <30d|12h> [--yes] [backend options]   delete old archived tasks (dry run unless --yes)
+       dovo add <name> <url> [--token <token>] [--ssh <user@host>] [--agent]   (ssh: managed tunnel; agent: it is an A2A worker)
        dovo token <token> [--profile <name>]
 
 backend options (pick one source):
   --url <url>        Dovo runtime address (default: saved profile)
   --token <token>    device token for this run
   --profile <name>   saved runtime profile
+  --all              every saved runtime at once, as one workspace
+  --a2a <port>       (serve) also expose an A2A agent; calls need a bearer token (DOVO_A2A_TOKEN, else one is made)
   --demo             scripted runtime, no Dovo required
+
+display options:
+  --theme <name>     colour theme (default: saved choice, else auto); press t in the task list
+                     lists them. Your own live in ~/.config/dovo-terminal/themes/*.json
 
 route options (TUI runs the same either way):
   --server <url>     use an already-running "dovo serve" instance
   --local           no local server; the runtime is used in-process
   -h, --help         this message`;
 
-interface Options {
-  [key: string]: string | boolean | undefined;
-  url?: string;
-  token?: string;
-  profile?: string;
-  demo?: boolean;
-  server?: string;
-  local?: boolean;
-  port?: string;
-}
-
-function buildBackend(values: Options): RuntimeClient {
-  if (values.demo) {
-    return createDemoClient();
-  }
-  const runtime = resolveRuntime({
-    url: values.url,
-    token: values.token,
-    profile: values.profile,
-  });
-  return createDovoClient(runtime);
-}
-
 async function runServe(values: Options): Promise<void> {
-  const backend = await buildBackend(values);
+  const { client: backend } = await openBackend(values);
+  watchTeams(backend, loadConfig().teamsWebhook);
   const server = await startRuntimeServer({
     client: backend,
     port: Number(values.port ?? DEFAULT_SERVE_PORT),
@@ -73,19 +67,88 @@ async function runServe(values: Options): Promise<void> {
     `dovo runtime server on ${server.url}\n` +
       `connect with: dovo --server ${server.url}\nctrl+c to stop\n`,
   );
+  const agent = await maybeServeAgent(backend, values);
   await Promise.race([once(process, "SIGINT"), once(process, "SIGTERM")]);
+  await agent?.close();
   await server.close();
+}
+
+/** `dovo serve --a2a [port]`: let other agents delegate tasks to this runtime. */
+async function maybeServeAgent(backend: RuntimeClient, values: Options) {
+  if (values.a2a === undefined) {
+    return null;
+  }
+  const config = loadConfig();
+  const agent = await startAgentServer({
+    client: backend,
+    port: Number(values.a2a || DEFAULT_A2A_PORT),
+    token: a2aTokenFor(config, process.env["DOVO_A2A_TOKEN"]),
+    dbPath: dataPath("a2a.db"),
+    allow: config.a2aAllow,
+    ...(config.a2aPublicUrl && { publicUrl: config.a2aPublicUrl }),
+  });
+  process.stdout.write(
+    `A2A agent on ${agent.url} (card: ${agent.url}/.well-known/agent-card.json)\n` +
+      "callers send  Authorization: Bearer <token>   (show it with: dovo a2a-token)\n",
+  );
+
+  return agent;
 }
 
 async function runTerminal(values: Options): Promise<void> {
   let backend: RuntimeClient | null = null;
+  let machines: Machine[] = [];
   if (!values.server) {
-    backend = buildBackend(values);
+    const opened = await openBackend(values);
+    backend = opened.client;
+    machines = opened.machines;
   }
   const session = await openRuntime(backend, routeFor(values));
-  const app = new App(session.client);
+  const config = loadConfig();
+  watchTeams(session.client, config.teamsWebhook);
+  const { themes, problems } = loadUserThemes(themesDir());
+  const app = new App(session.client, {
+    themes,
+    theme: values.theme ?? config.theme ?? "auto",
+    onThemeChange: saveThemeChoice,
+    keys: validKeys(config.keys ?? {}),
+    shellFor: (project) => shellForProject(project, values, config),
+    checkMachines: () => runChecks(targetsFor(machines, config)),
+    openPort: (port) =>
+      openService(port, {
+        client: session.client,
+        ssh: profileFor(port.projectId, values, config)?.ssh,
+      }),
+    ...(config.github && { projectNote: createGithubNotes() }),
+  });
+  app.statusNote = problems[0] ?? app.statusNote;
   process.title = `dovo-terminal (${describeBackend(values)})`;
   await app.start(new TaskListScreen(app));
+}
+
+/** Post to Teams when configured (config `teamsWebhook`, or env DOVO_TEAMS_WEBHOOK). */
+function watchTeams(client: RuntimeClient, saved: string | undefined): void {
+  const webhook = process.env["DOVO_TEAMS_WEBHOOK"] ?? saved;
+  if (!webhook) {
+    return;
+  }
+  if (isSafeWebhook(webhook)) {
+    startTeamsNotifier(client, webhook); // runs until the process exits
+  } else {
+    process.stderr.write("dovo-terminal: teams webhook ignored (it must be an https URL)\n");
+  }
+}
+
+/** The configured keys that name a real action; unknown names are ignored. */
+function validKeys(configured: Record<string, string>): KeyOverrides {
+  return Object.fromEntries(Object.entries(configured).filter(([action]) => isListAction(action)));
+}
+
+/** Remember the theme picked in the app (a --theme flag only applies to one run). */
+function saveThemeChoice(setting: string): void {
+  const config = loadConfig();
+  config.theme = setting;
+  saveConfig(config);
 }
 
 /** What the process title reports about the chosen backend. */
@@ -123,6 +186,16 @@ async function main(): Promise<void> {
       server: { type: "string" },
       local: { type: "boolean" },
       port: { type: "string" },
+      theme: { type: "string" },
+      all: { type: "boolean" },
+      a2a: { type: "string" },
+      older: { type: "string" },
+      yes: { type: "boolean" },
+      rotate: { type: "boolean" },
+      agent: { type: "boolean" },
+      planner: { type: "string" },
+      worker: { type: "string" },
+      ssh: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
   });
@@ -144,6 +217,22 @@ async function dispatchCommand(
     await runServe(values);
     return;
   }
+  if (command === "orchestrate") {
+    await runOrchestrate(values, positionals[1]);
+    return;
+  }
+  if (command === "a2a-token") {
+    showA2aToken(values);
+    return;
+  }
+  if (command === "doctor") {
+    await runDoctor(values);
+    return;
+  }
+  if (command === "prune") {
+    await runPrune(values);
+    return;
+  }
   if (command === "add") {
     addRuntime(values, positionals);
     return;
@@ -153,41 +242,6 @@ async function dispatchCommand(
     return;
   }
   await runTerminal(values);
-}
-
-/** `dovo add`: remember a named runtime; the first one becomes current. */
-function addRuntime(values: Options, positionals: string[]): void {
-  const [, name, url] = positionals;
-  if (!(name && url)) {
-    throw new Error("usage: dovo add <name> <url>");
-  }
-  const config = loadConfig();
-  const profile: RuntimeProfile = { url };
-  if (values.token) {
-    profile.token = values.token;
-  }
-  config.runtimes[name] = profile;
-  if (!config.current || config.current === "local") {
-    config.current = name;
-  }
-  saveConfig(config);
-  process.stdout.write(`saved runtime "${name}" → ${url}\n`);
-}
-
-/** `dovo token`: attach an owner token to a runtime profile. */
-function addToken(values: Options, positionals: string[]): void {
-  const [, token] = positionals;
-  if (!token) {
-    throw new Error("usage: dovo token <token>");
-  }
-  const config = loadConfig();
-  const name = values.profile ?? config.current;
-  config.runtimes[name] = {
-    ...(config.runtimes[name] ?? { url: DEFAULT_PRODUCTION_ORIGIN }),
-    token,
-  };
-  saveConfig(config);
-  process.stdout.write(`saved token for runtime "${name}"\n`);
 }
 
 main().catch((error: unknown) => {

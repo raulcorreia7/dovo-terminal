@@ -2,24 +2,26 @@
 // Anything that talks to the network lives in dovo.ts; anything that follows
 // the /ws/sync stream lives in dovo-sync.ts / dovo-view.ts.
 
-import type {
-  WireApproval,
-  WireQuestion,
-  WireSnapshot,
-  WireTask,
-  WireTaskDraft,
-} from "dovo-terminal/client/dovo-wire.ts";
-import { type ActivityEvent, ToolPayloadSchema } from "dovo-terminal/client/dovo-wire.ts";
-import { guard } from "dovo-terminal/protocol/guard.ts";
+import { guard } from "@dovo-terminal/protocol/guard.ts";
 import type {
   AgentProvider,
   ConversationItem,
   CreateTaskInput,
+  ModelOption,
   Project,
   TaskStatus,
   TaskSummary,
-} from "dovo-terminal/protocol/workspace.ts";
-import { TASK_TITLE_MAX_CHARS } from "dovo-terminal/protocol/workspace.ts";
+} from "@dovo-terminal/protocol/workspace.ts";
+import { TASK_TITLE_MAX_CHARS } from "@dovo-terminal/protocol/workspace.ts";
+import type {
+  WireApproval,
+  WireModelEntry,
+  WireQuestion,
+  WireSnapshot,
+  WireTask,
+  WireTaskDraft,
+} from "./dovo-wire.ts";
+import { type ActivityEvent, ToolPayloadSchema } from "./dovo-wire.ts";
 
 // Item ids the TUI round-trips to control endpoints: the prefix selects the
 // endpoint, so both directions must spell it identically.
@@ -57,10 +59,45 @@ export function toProjects(snapshot: WireSnapshot): Project[] {
   }));
 }
 
+// How people know the harnesses the runtime can drive. An id not listed here
+// (a newer harness) shows under its own id rather than disappearing.
+const HARNESS_NAMES: Readonly<Record<string, string>> = {
+  codex: "Codex",
+  claude: "Claude",
+  opencode: "OpenCode",
+  pi: "Pi",
+  vibe: "Vibe",
+  hermes: "Hermes",
+  copilot: "Copilot",
+  grok: "Grok",
+  muse: "Muse",
+  cursor: "Cursor",
+  acp: "ACP agent",
+};
+
+export function harnessLabel(harnessId: string): string {
+  return HARNESS_NAMES[harnessId] ?? harnessId;
+}
+
+/** Catalog entries as model options; an entry that names nothing is skipped. */
+export function toModelOptions(entries: readonly (string | WireModelEntry)[]): ModelOption[] {
+  return entries.flatMap((entry): ModelOption[] => {
+    if (typeof entry === "string") {
+      return entry ? [{ id: entry, label: entry }] : [];
+    }
+    const id = entry.id ?? entry.value ?? entry.name ?? entry.label;
+    if (!id) {
+      return [];
+    }
+
+    return [{ id, label: entry.label ?? entry.name ?? id }];
+  });
+}
+
 export function toProviders(snapshot: WireSnapshot): AgentProvider[] {
   return (snapshot.workspace?.agents ?? []).map((agent) => ({
     id: agent.id,
-    label: `${agent.name} (${agent.provider})`,
+    label: `${agent.name} (${harnessLabel(agent.provider)})`,
   }));
 }
 
@@ -242,7 +279,7 @@ export function taskDraft(
     agentId: "",
     harness: {
       provider: input.providerId.replace(HARNESS_PREFIX, ""),
-      model: "",
+      model: input.model ?? "",
       reasoning: "",
       serviceTier: "",
       instructions: "",

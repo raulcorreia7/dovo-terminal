@@ -1,7 +1,7 @@
 // Upstream reachability as an explicit lifecycle, not booleans: every client
 // shares this machine, so the header can tell "connecting", "reconnecting" and
 // "offline" apart, and an illegal transition becomes impossible to emit.
-import type { ConnectionPhase } from "dovo-terminal/protocol/sync.ts";
+import type { ConnectionPhase } from "./sync.ts";
 
 const ALLOWED_TRANSITIONS: Record<ConnectionPhase, readonly ConnectionPhase[]> = {
   connecting: ["online", "offline"],

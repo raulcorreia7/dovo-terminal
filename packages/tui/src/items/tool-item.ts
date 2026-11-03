@@ -1,6 +1,6 @@
+import { assertNever } from "@dovo-terminal/protocol/errors.ts";
 import { type Component, truncateToWidth } from "@earendil-works/pi-tui";
-import { assertNever } from "dovo-terminal/protocol/errors.ts";
-import { colors, t } from "../theme.ts";
+import { colors, t } from "../theme/index.ts";
 
 export class ToolItem implements Component {
   private name: string;

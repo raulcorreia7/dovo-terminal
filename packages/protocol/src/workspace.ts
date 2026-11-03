@@ -40,9 +40,53 @@ export type TaskSummary = z.infer<typeof TaskSummarySchema>;
 // A task title is the prompt's first line, capped so list rows stay stable.
 export const TASK_TITLE_MAX_CHARS = 72;
 
+/** A client paired with the runtime, or one that is asking to be. */
+export const DeviceSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  pending: z.boolean(),
+});
+export type Device = z.infer<typeof DeviceSchema>;
+
+/** What the owner shows a new device: a short-lived code to enter there. */
+export const InviteSchema = z.object({
+  code: z.string(),
+  /** When the code stops working, if the runtime says. */
+  expiresAt: z.string().optional(),
+});
+export type Invite = z.infer<typeof InviteSchema>;
+
+/** Approve or deny a waiting device, or revoke a paired one. */
+export const DeviceDecisionSchema = z.enum(["approve", "deny", "revoke"]);
+export type DeviceDecision = z.infer<typeof DeviceDecisionSchema>;
+
+/**
+ * A web service a project's process is listening on, on the machine the project
+ * lives on. `pid` and `started` identify the process, so a port that has since
+ * been taken over by something else can be told apart before it is opened.
+ */
+export const ServicePortSchema = z.object({
+  port: z.number().int().min(1).max(65_535),
+  command: z.string(),
+  folder: z.string(),
+  projectId: z.string(),
+  pid: z.number().int(),
+  started: z.string(),
+});
+export type ServicePort = z.infer<typeof ServicePortSchema>;
+
+/** One model a harness can run. `id` is what the runtime expects; `label` is for people. */
+export const ModelOptionSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+});
+export type ModelOption = z.infer<typeof ModelOptionSchema>;
+
 export const CreateTaskInputSchema = z.object({
   projectId: z.string(),
   providerId: z.string(),
+  /** Omitted (or empty) means the harness's own default model. */
+  model: z.string().optional(),
   prompt: z.string(),
 });
 export type CreateTaskInput = z.infer<typeof CreateTaskInputSchema>;

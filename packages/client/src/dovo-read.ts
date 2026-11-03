@@ -3,31 +3,35 @@
 // within one refresh are deduped; a threads-scope fetch never receives an
 // overview. Task mutations and the live stream live in dovo.ts/dovo-sync.ts.
 
+import { guard } from "@dovo-terminal/protocol/guard.ts";
+import type {
+  AgentProvider,
+  ConversationItem,
+  ModelOption,
+  Project,
+  TaskHistory,
+  TaskSummary,
+} from "@dovo-terminal/protocol/workspace.ts";
 import {
   findSummaryTask,
+  harnessLabel,
   historyItems,
   pendingTaskIds,
+  toModelOptions,
   toProjects,
   toProviders,
   toTaskSummary,
   toToolItem,
-} from "dovo-terminal/client/dovo-map.ts";
-import type { ViewProjector } from "dovo-terminal/client/dovo-view.ts";
+} from "./dovo-map.ts";
+import type { ViewProjector } from "./dovo-view.ts";
 import {
   type ActivityEvent,
   ActivityPageSchema,
   AgentAvailabilityListSchema,
+  AgentModelsSchema,
   SnapshotSchema,
   type WireSnapshot,
-} from "dovo-terminal/client/dovo-wire.ts";
-import { guard } from "dovo-terminal/protocol/guard.ts";
-import type {
-  AgentProvider,
-  ConversationItem,
-  Project,
-  TaskHistory,
-  TaskSummary,
-} from "dovo-terminal/protocol/workspace.ts";
+} from "./dovo-wire.ts";
 
 export class SnapshotReader {
   // snapshot fetch dedupe: only for IDENTICAL queries (the three list* calls
@@ -90,6 +94,16 @@ export class SnapshotReader {
     return tasks;
   }
 
+  /** Threads hidden by archiving (`archivedAt` set); the normal list leaves them out. */
+  async archivedList(): Promise<TaskSummary[]> {
+    const snapshot = await this.snapshot("?scope=overview");
+    const pending = pendingTaskIds(snapshot);
+
+    return (snapshot.workspace?.tasks ?? [])
+      .filter((task) => task.archivedAt)
+      .map((task) => toTaskSummary(task, pending));
+  }
+
   async providers(): Promise<AgentProvider[]> {
     const snapshot = await this.snapshot("?scope=overview");
     const providers = toProviders(snapshot);
@@ -105,13 +119,35 @@ export class SnapshotReader {
         }
         const id = entry.id.slice("harness:".length);
         if (!providers.some((provider) => provider.id === id)) {
-          providers.push({ id, label: id });
+          providers.push({ id, label: harnessLabel(id) });
         }
       }
     } catch {
       // availability probe is optional; profiles remain usable
     }
     return providers;
+  }
+
+  /**
+   * Models for a harness. A configured profile fixes its own model, so only a
+   * bare harness has a catalog. The probe is optional: any failure means "no
+   * choice offered", never a broken new-task flow.
+   */
+  async models(providerId: string): Promise<ModelOption[]> {
+    const snapshot = await this.snapshot("?scope=overview");
+    if (toProviders(snapshot).some((profile) => profile.id === providerId)) {
+      return [];
+    }
+    try {
+      const reply = await this.request("/api/agents/models", {
+        method: "POST",
+        body: JSON.stringify({ provider: providerId }),
+      });
+
+      return toModelOptions(guard(AgentModelsSchema, reply).models);
+    } catch {
+      return [];
+    }
   }
 
   async history(taskId: string): Promise<TaskHistory> {

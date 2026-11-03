@@ -1,7 +1,5 @@
 import { type Component, Markdown } from "@earendil-works/pi-tui";
-import { colors, markdownTheme, t } from "../theme.ts";
-
-const roleDovo = t(" dovo ", colors.accent, { bold: true });
+import { colors, markdownTheme, t } from "../theme/index.ts";
 
 export class AssistantItem implements Component {
   private view: Markdown;
@@ -18,6 +16,9 @@ export class AssistantItem implements Component {
     if (width <= 3) {
       return [];
     }
-    return [` ${roleDovo}`, ...this.view.render(width - 3).map((line) => `   ${line}`)];
+    return [
+      ` ${t(" dovo ", colors.accent, { bold: true })}`,
+      ...this.view.render(width - 3).map((line) => `   ${line}`),
+    ];
   }
 }

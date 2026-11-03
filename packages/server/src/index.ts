@@ -8,11 +8,11 @@
 import { once } from "node:events";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { RuntimeClient } from "dovo-terminal/client/runtime-client.ts";
-import { ENDPOINTS } from "dovo-terminal/protocol/http.ts";
-import { handleRequest } from "dovo-terminal/server/routes.ts";
-import { SyncHub } from "dovo-terminal/server/sync-hub.ts";
+import { ENDPOINTS } from "@dovo-terminal/protocol/http.ts";
+import type { RuntimeClient } from "@dovo-terminal/protocol/runtime-client.ts";
 import { WebSocketServer } from "ws";
+import { handleRequest } from "./routes.ts";
+import { SyncHub } from "./sync-hub.ts";
 
 interface RuntimeServerOptions {
   client: RuntimeClient;

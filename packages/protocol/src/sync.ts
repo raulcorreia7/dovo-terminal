@@ -2,8 +2,8 @@
 // implementations never get polled. The same frame union flows over three
 // hops unchanged: upstream adapter -> local server -> /ws/sync -> TUI.
 
-import { ConversationItemSchema, TaskStatusSchema } from "dovo-terminal/protocol/workspace.ts";
 import { z } from "zod";
+import { ConversationItemSchema, TaskStatusSchema } from "./workspace.ts";
 
 export const TaskEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("item.append"), taskId: z.string(), item: ConversationItemSchema }),

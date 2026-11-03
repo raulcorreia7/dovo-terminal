@@ -3,7 +3,12 @@
 // ViewProjector (dovo-view.ts); this file only moves bytes and keeps the
 // stream consistent. Connection lifecycle is emitted through the shared sink.
 
-import type { ViewProjector } from "dovo-terminal/client/dovo-view.ts";
+import { ConnectionStateMachine } from "@dovo-terminal/protocol/connection-state.ts";
+import { guard } from "@dovo-terminal/protocol/guard.ts";
+import type { ConnectionPhase } from "@dovo-terminal/protocol/sync.ts";
+import type { SyncSink } from "@dovo-terminal/protocol/sync-sink.ts";
+import { WebSocket } from "ws";
+import type { ViewProjector } from "./dovo-view.ts";
 import {
   ActivityDeltaSchema,
   ActivityEventListSchema,
@@ -13,12 +18,7 @@ import {
   SyncFrameSchema,
   type SyncInputFrame,
   SyncTicketSchema,
-} from "dovo-terminal/client/dovo-wire.ts";
-import { ConnectionStateMachine } from "dovo-terminal/protocol/connection-state.ts";
-import { guard } from "dovo-terminal/protocol/guard.ts";
-import type { ConnectionPhase } from "dovo-terminal/protocol/sync.ts";
-import type { SyncSink } from "dovo-terminal/protocol/sync-sink.ts";
-import { WebSocket } from "ws";
+} from "./dovo-wire.ts";
 
 // Upstream WS reconnect: start at 1 s, cap at 10 s (Dovo rebases via snapshot
 // frames, so a slow retry is safe).
@@ -132,34 +132,21 @@ export class SyncChannel {
 
   private applyFrame(frame: SyncFrame): void {
     switch (frame.type) {
-      case "snapshot": {
-        this.epoch = String(frame["epoch"] ?? "");
-        this.sequence = Number(frame["sequence"] ?? 0);
-        const baseline = guard(SnapshotSchema, frame["snapshot"]);
-        this.deps.projector.applySnapshotBaseline(baseline);
+      case "snapshot":
+        this.takeSnapshot(frame);
         break;
-      }
-      case "selection": {
-        this.epoch = String(frame["epoch"] ?? "");
-        this.sequence = Number(frame["sequence"] ?? 0);
-        const selection = guard(SyncDeltaSchema, frame["delta"] ?? {});
-        this.deps.projector.applyDelta(selection, true);
+      case "selection":
+        this.takeSelection(frame);
         break;
-      }
       case "delta":
         this.takeDeltaFrame(frame);
         break;
-      case "activity": {
-        // a malformed batch is dropped wholesale; partial tool state is worse
-        const events = guard(ActivityEventListSchema, frame["events"] ?? []);
-        this.deps.projector.applyActivity(String(frame["scope"] ?? ""), events);
+      case "activity":
+        this.takeActivity(frame);
         break;
-      }
-      case "activity-delta": {
-        const delta = guard(ActivityDeltaSchema, frame["delta"] ?? {});
-        this.deps.projector.applyActivityDelta(String(frame["scope"] ?? ""), delta);
+      case "activity-delta":
+        this.takeActivityDelta(frame);
         break;
-      }
       case "heartbeat":
         this.takeHeartbeat(frame);
         break;
@@ -167,6 +154,37 @@ export class SyncChannel {
         // Unknown frame type from a newer runtime: ignore it, never crash.
         return;
     }
+  }
+
+  /** Adopt the position a baseline-carrying frame reports. */
+  private adoptCursor(frame: Record<string, unknown>): void {
+    this.epoch = String(frame["epoch"] ?? "");
+    this.sequence = Number(frame["sequence"] ?? 0);
+  }
+
+  private takeSnapshot(frame: Record<string, unknown>): void {
+    this.adoptCursor(frame);
+
+    const baseline = guard(SnapshotSchema, frame["snapshot"]);
+    this.deps.projector.applySnapshotBaseline(baseline);
+  }
+
+  private takeSelection(frame: Record<string, unknown>): void {
+    this.adoptCursor(frame);
+
+    const selection = guard(SyncDeltaSchema, frame["delta"] ?? {});
+    this.deps.projector.applyDelta(selection, true);
+  }
+
+  /** A malformed batch is dropped wholesale; partial tool state is worse. */
+  private takeActivity(frame: Record<string, unknown>): void {
+    const events = guard(ActivityEventListSchema, frame["events"] ?? []);
+    this.deps.projector.applyActivity(String(frame["scope"] ?? ""), events);
+  }
+
+  private takeActivityDelta(frame: Record<string, unknown>): void {
+    const delta = guard(ActivityDeltaSchema, frame["delta"] ?? {});
+    this.deps.projector.applyActivityDelta(String(frame["scope"] ?? ""), delta);
   }
 
   /** Delta frame: apply in order, resume across a cursor gap, rebase on a new epoch. */

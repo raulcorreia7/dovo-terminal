@@ -1,19 +1,25 @@
 import { Container, Key, matchesKey, Text } from "@earendil-works/pi-tui";
-import { colors, t } from "dovo-terminal/tui/theme.ts";
+import { colors, t } from "./theme/index.ts";
 
-/** Archive/delete gate: y or enter acts, anything else cancels. */
+/** "archive "x"?" or "delete permanently "x"?": the question for removing a task. */
+export function removeHeadline(taskTitle: string, permanently: boolean): string {
+  const verb = permanently
+    ? t("delete permanently", colors.error, { bold: true })
+    : t("archive", colors.warn);
+
+  return `${verb} ${t(`"${taskTitle || "(untitled)"}"`, colors.text, { bold: true })}?`;
+}
+
+/** A yes/no gate: y or enter acts, anything else cancels. */
 export class ConfirmPrompt extends Container {
   onAnswer: (accept: boolean) => void = () => undefined;
 
-  constructor(taskTitle: string, permanently: boolean) {
+  constructor(headline: string) {
     super();
-    const verb = permanently
-      ? t("delete permanently", colors.error, { bold: true })
-      : t("archive", colors.warn);
     this.addChild(
       new Text(
         [
-          ` ${verb} ${t(`"${taskTitle || "(untitled)"}"`, colors.text, { bold: true })}?`,
+          ` ${headline}`,
           "",
           `   ${t("y", colors.text, { bold: true })}${t(" confirm   ", colors.muted)}${t("any other key", colors.text, { bold: true })}${t(" cancel", colors.muted)}`,
         ].join("\n"),

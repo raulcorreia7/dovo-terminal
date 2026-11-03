@@ -7,6 +7,27 @@
 // ?format=5&history=paged -> ws /ws/sync; format 5 activates view
 // subscriptions ("watch") so focused-task activity flows.
 import { randomUUID } from "node:crypto";
+import { DovoError } from "@dovo-terminal/protocol/errors.ts";
+import { guard } from "@dovo-terminal/protocol/guard.ts";
+import { lifecycleAction } from "@dovo-terminal/protocol/http.ts";
+import type {
+  ArchiveStore,
+  DeviceDirectory,
+  PortDirectory,
+  RuntimeClient,
+} from "@dovo-terminal/protocol/runtime-client.ts";
+import type { SyncListener, TaskEvent, Unsubscribe } from "@dovo-terminal/protocol/sync.ts";
+import { SyncSink } from "@dovo-terminal/protocol/sync-sink.ts";
+import { UpstreamError } from "@dovo-terminal/protocol/upstream-error.ts";
+import type {
+  AgentProvider,
+  CreateTaskInput,
+  ModelOption,
+  Project,
+  TaskHistory,
+  TaskSummary,
+} from "@dovo-terminal/protocol/workspace.ts";
+import { DeviceDesk } from "./dovo-devices.ts";
 import {
   APPROVAL_PREFIX,
   answerEcho,
@@ -15,10 +36,10 @@ import {
   QUESTION_PREFIX,
   taskDraft,
   toProviders,
-} from "dovo-terminal/client/dovo-map.ts";
-import { SnapshotReader } from "dovo-terminal/client/dovo-read.ts";
-import { SyncChannel } from "dovo-terminal/client/dovo-sync.ts";
-import { ViewProjector } from "dovo-terminal/client/dovo-view.ts";
+} from "./dovo-map.ts";
+import { SnapshotReader } from "./dovo-read.ts";
+import { SyncChannel } from "./dovo-sync.ts";
+import { ViewProjector } from "./dovo-view.ts";
 import {
   type AnswerBody,
   type ApprovalBody,
@@ -28,26 +49,21 @@ import {
   type MessageBody,
   MutationOutcomeSchema,
   type WireSnapshot,
-} from "dovo-terminal/client/dovo-wire.ts";
-import type { RuntimeClient } from "dovo-terminal/client/runtime-client.ts";
-import type { RuntimeConfig } from "dovo-terminal/config.ts";
-import { DovoError } from "dovo-terminal/protocol/errors.ts";
-import { guard } from "dovo-terminal/protocol/guard.ts";
-import { lifecycleAction } from "dovo-terminal/protocol/http.ts";
-import type { SyncListener, TaskEvent, Unsubscribe } from "dovo-terminal/protocol/sync.ts";
-import { SyncSink } from "dovo-terminal/protocol/sync-sink.ts";
-import { UpstreamError } from "dovo-terminal/protocol/upstream-error.ts";
-import type {
-  AgentProvider,
-  CreateTaskInput,
-  Project,
-  TaskHistory,
-  TaskSummary,
-} from "dovo-terminal/protocol/workspace.ts";
+} from "./dovo-wire.ts";
+import { scanPorts } from "./ports.ts";
 
 const PROBLEM_DETAIL_CHARS = 300; // upstream error body kept in DovoError
 
 /** Talks to a real Dovo Studio runtime (apps/api); used by the local server. */
+/** Where a Dovo runtime lives and how to authenticate to it. */
+export interface RuntimeConfig {
+  url: string;
+  /** The runtime runs on this machine, so its processes can be inspected here. */
+  local?: boolean | undefined;
+  /** absent means "discover one" (env, connection file, owner-token file) */
+  token?: string | undefined;
+}
+
 export function createDovoClient(config: RuntimeConfig): RuntimeClient {
   return new DovoRuntime(config);
 }
@@ -61,6 +77,16 @@ class DovoRuntime implements RuntimeClient {
   private readonly channel: SyncChannel;
 
   private readonly reader: SnapshotReader;
+  readonly devices: DeviceDirectory;
+  readonly archive: ArchiveStore = { list: () => this.reader.archivedList() };
+  /**
+   * The Dovo runtime has no port data of its own. When it runs on this machine we
+   * can see its processes; when it runs elsewhere that machine's own `dovo serve`
+   * answers. This client never guesses from here.
+   */
+  readonly ports: PortDirectory = {
+    list: async () => (this.config.local ? scanPorts(await this.listProjects()) : []),
+  };
   private readonly config: RuntimeConfig;
 
   constructor(config: RuntimeConfig) {
@@ -75,6 +101,10 @@ class DovoRuntime implements RuntimeClient {
       (path, init) => this.request(path, init),
       this.tasks,
       this.projector,
+    );
+    this.devices = new DeviceDesk(
+      (path, init) => this.request(path, init),
+      (query) => this.reader.snapshot(query),
     );
     this.channel = new SyncChannel({
       url: () => this.config.url,
@@ -106,6 +136,10 @@ class DovoRuntime implements RuntimeClient {
     return await response.json();
   }
 
+  private async post(path: string, body: object): Promise<void> {
+    await this.request(path, { method: "POST", body: JSON.stringify(body) });
+  }
+
   private snapshot(query: string): Promise<WireSnapshot> {
     return this.reader.snapshot(query);
   }
@@ -120,6 +154,10 @@ class DovoRuntime implements RuntimeClient {
 
   listProviders(): Promise<AgentProvider[]> {
     return this.reader.providers();
+  }
+
+  listModels(providerId: string): Promise<ModelOption[]> {
+    return this.reader.models(providerId);
   }
 
   getTaskHistory(taskId: string): Promise<TaskHistory> {
@@ -168,7 +206,7 @@ class DovoRuntime implements RuntimeClient {
     // No turnSettings: it is a strictStruct whose provider only accepts
     // harness literals, and the run already binds to the task's agentId/harness.
     const body: MessageBody = { id: taskId, messageId: randomUUID(), text };
-    await this.request("/api/tasks/message", { method: "POST", body: JSON.stringify(body) });
+    await this.post("/api/tasks/message", body);
   }
 
   async stopTask(taskId: string): Promise<void> {
@@ -177,7 +215,7 @@ class DovoRuntime implements RuntimeClient {
       throw new DovoError("task has no active run to stop");
     }
     const body: CancelTaskBody = { id: taskId, runId };
-    await this.request("/api/tasks/cancel", { method: "POST", body: JSON.stringify(body) });
+    await this.post("/api/tasks/cancel", body);
     const task = this.tasks.get(taskId);
     if (task) {
       task.status = "idle";
@@ -186,15 +224,18 @@ class DovoRuntime implements RuntimeClient {
     this.emit({ type: "status", taskId, status: "idle" });
   }
 
-  async setTaskArchived(taskId: string, archived: boolean): Promise<void> {
-    const body: LifecycleBody = { id: taskId, action: lifecycleAction(archived) };
-    await this.request("/api/tasks/lifecycle", { method: "POST", body: JSON.stringify(body) });
-    this.tasks.delete(taskId);
+  setTaskArchived(taskId: string, archived: boolean): Promise<void> {
+    return this.leaveList(taskId, lifecycleAction(archived));
   }
 
-  async deleteTask(taskId: string): Promise<void> {
-    const body: LifecycleBody = { id: taskId, action: "delete" };
-    await this.request("/api/tasks/lifecycle", { method: "POST", body: JSON.stringify(body) });
+  deleteTask(taskId: string): Promise<void> {
+    return this.leaveList(taskId, "delete");
+  }
+
+  /** Archive and delete both remove the task from the list this client serves. */
+  private async leaveList(taskId: string, action: LifecycleBody["action"]): Promise<void> {
+    const body: LifecycleBody = { id: taskId, action };
+    await this.post("/api/tasks/lifecycle", body);
     this.tasks.delete(taskId);
   }
 
@@ -206,7 +247,7 @@ class DovoRuntime implements RuntimeClient {
         allow,
         decision,
       };
-      await this.request("/api/approvals", { method: "POST", body: JSON.stringify(body) });
+      await this.post("/api/approvals", body);
     } else if (itemId.startsWith(QUESTION_PREFIX)) {
       const wireId = itemId.slice(QUESTION_PREFIX.length);
       const questionId =
@@ -214,7 +255,7 @@ class DovoRuntime implements RuntimeClient {
         firstQuestionFieldId(await this.snapshot("?scope=overview"), wireId) ??
         this.registerQuestion(wireId);
       const body: AnswerBody = { id: wireId, answers: { [questionId]: [answer] } };
-      await this.request("/api/tasks/answer", { method: "POST", body: JSON.stringify(body) });
+      await this.post("/api/tasks/answer", body);
     } else {
       throw new DovoError(`unknown item ${itemId}`);
     }

@@ -9,15 +9,44 @@
 // Every method rejects with DovoError. Realtime data arrives via subscribe,
 // never polling. Implementations must release everything on close(): sockets,
 // timers, subscriptions; close() resolves when nothing is left running.
-import type { SyncListener, Unsubscribe } from "dovo-terminal/protocol/sync.ts";
+import type { SyncListener, Unsubscribe } from "./sync.ts";
 import type {
   AgentProvider,
   CreateTaskInput,
+  Device,
+  DeviceDecision,
+  Invite,
+  ModelOption,
   Project,
+  ServicePort,
   TaskHistory,
   TaskSummary,
-} from "dovo-terminal/protocol/workspace.ts";
+} from "./workspace.ts";
 
+/** Tasks hidden by archiving; they are not part of `listTasks`. */
+export interface ArchiveStore {
+  list(): Promise<TaskSummary[]>;
+}
+
+/** Who may connect to the runtime: paired and waiting devices, and invitations. */
+export interface DeviceDirectory {
+  /** Paired and waiting devices. */
+  list(): Promise<Device[]>;
+  /** A short-lived code that a new device enters to ask for access. */
+  invite(): Promise<Invite>;
+  decide(deviceId: string, decision: DeviceDecision): Promise<void>;
+}
+
+/** Web services the projects' processes are serving, where each project lives. */
+export interface PortDirectory {
+  list(): Promise<ServicePort[]>;
+}
+
+/**
+ * What every runtime can do. Abilities that only some runtimes have are the
+ * optional properties: when one is absent, that runtime cannot do it, and the
+ * caller says so instead of being handed an empty answer that means nothing.
+ */
 export interface RuntimeClient {
   /** Realtime frames (task events, connection state, sync hints). */
   subscribe(listener: SyncListener): Unsubscribe;
@@ -30,6 +59,8 @@ export interface RuntimeClient {
   listProjects(): Promise<Project[]>;
   listTasks(): Promise<TaskSummary[]>;
   listProviders(): Promise<AgentProvider[]>;
+  /** Models a provider offers; empty means its model is fixed or it offers no choice. */
+  listModels(providerId: string): Promise<ModelOption[]>;
   getTaskHistory(taskId: string): Promise<TaskHistory>;
   createTask(input: CreateTaskInput): Promise<TaskSummary>;
   sendMessage(taskId: string, text: string): Promise<void>;
@@ -40,4 +71,8 @@ export interface RuntimeClient {
   deleteTask(taskId: string): Promise<void>;
   /** Resolve an approval/question item with an option id or free text. */
   answerItem(taskId: string, itemId: string, answer: string): Promise<void>;
+
+  readonly archive?: ArchiveStore | undefined;
+  readonly devices?: DeviceDirectory | undefined;
+  readonly ports?: PortDirectory | undefined;
 }

@@ -3,23 +3,17 @@
 // (streaming text, emitted prompts/tools, pending approvals); transport and
 // cursors live in dovo-sync.ts, HTTP in dovo.ts.
 
-import {
-  approvalItem,
-  questionItem,
-  statusMap,
-  toMessageItem,
-  toToolItem,
-} from "dovo-terminal/client/dovo-map.ts";
+import type { TaskEvent } from "@dovo-terminal/protocol/sync.ts";
+import type { SyncSink } from "@dovo-terminal/protocol/sync-sink.ts";
+import type { TaskSummary } from "@dovo-terminal/protocol/workspace.ts";
+import { approvalItem, questionItem, statusMap, toMessageItem, toToolItem } from "./dovo-map.ts";
 import type {
   ActivityDelta,
   ActivityEvent,
   MessageChange,
   SyncDelta,
   WireSnapshot,
-} from "dovo-terminal/client/dovo-wire.ts";
-import type { TaskEvent } from "dovo-terminal/protocol/sync.ts";
-import type { SyncSink } from "dovo-terminal/protocol/sync-sink.ts";
-import type { TaskSummary } from "dovo-terminal/protocol/workspace.ts";
+} from "./dovo-wire.ts";
 
 type ActivityChange = NonNullable<ActivityDelta["changes"]>[number];
 type ActivityPayloadEdit = Exclude<NonNullable<ActivityChange["payload"]>, string>;

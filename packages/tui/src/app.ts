@@ -1,36 +1,53 @@
-import {
-  Key,
-  matchesKey,
-  type OverlayHandle,
-  ProcessTerminal,
-  type Terminal,
-  Text,
-  TuiAltScreen,
-  VStack,
-} from "@earendil-works/pi-tui";
-import type { RuntimeClient } from "dovo-terminal/client/runtime-client.ts";
-import { asError, assertNever } from "dovo-terminal/protocol/errors.ts";
+import { asError, assertNever } from "@dovo-terminal/protocol/errors.ts";
+import type { RuntimeClient } from "@dovo-terminal/protocol/runtime-client.ts";
 import type {
   ConnectionPhase,
   SyncFrame,
   TaskEvent,
   Unsubscribe,
-} from "dovo-terminal/protocol/sync.ts";
-import type { AgentProvider, Project, TaskSummary } from "dovo-terminal/protocol/workspace.ts";
-import { HelpView } from "dovo-terminal/tui/help.ts";
-import { LineText } from "dovo-terminal/tui/line.ts";
-import type { Screen } from "dovo-terminal/tui/screen.ts";
-import { colors, t } from "dovo-terminal/tui/theme.ts";
+} from "@dovo-terminal/protocol/sync.ts";
+import type { AgentProvider, Project, TaskSummary } from "@dovo-terminal/protocol/workspace.ts";
+import {
+  Key,
+  matchesKey,
+  type OverlayHandle,
+  ProcessTerminal,
+  Text,
+  TuiAltScreen,
+  VStack,
+} from "@earendil-works/pi-tui";
+import type { AppOptions } from "./app-options.ts";
+import { headerText } from "./header.ts";
+import { HelpView } from "./help.ts";
+import type { KeyOverrides } from "./keys.ts";
+import { LineText } from "./line.ts";
+import { refreshNotes } from "./project-notes.ts";
+import type { Screen } from "./screen.ts";
+import type { ShellPlan } from "./shell-plan.ts";
+import { runInTerminal, withTerminalSuspended } from "./terminal-shell.ts";
+import { ThemeController } from "./theme/controller.ts";
+import { t } from "./theme/index.ts";
+import { AUTO_THEME } from "./theme/picker.ts";
 
 export class App {
   readonly tui: TuiAltScreen;
   private screen: Screen | null = null;
   private header: LineText | null = null;
   private helpOverlay: OverlayHandle | null = null;
+  private readonly themes: ThemeController;
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private unsubscribe: Unsubscribe | null = null;
   private stopped: boolean = false;
 
+  /** Folded projects in the task list; lives here so it survives screen rebuilds. */
+  readonly collapsedProjects = new Set<string>();
+  /** One line of outside status per project (e.g. its pull request), by project id. */
+  readonly projectNotes = new Map<string, string>();
+  readonly keys: KeyOverrides;
+  private readonly shellFor: AppOptions["shellFor"];
+  private readonly runShell: (plan: ShellPlan) => void;
+  readonly openPort: AppOptions["openPort"];
+  readonly checkMachines: AppOptions["checkMachines"];
   projects: Project[] = [];
   tasks: TaskSummary[] = [];
   providers: AgentProvider[] = [];
@@ -38,10 +55,26 @@ export class App {
   statusNote: string = "";
 
   readonly client: RuntimeClient;
+  private readonly projectNote: AppOptions["projectNote"];
 
-  constructor(client: RuntimeClient, terminal: Terminal = new ProcessTerminal()) {
+  constructor(client: RuntimeClient, options: AppOptions = {}) {
     this.client = client;
-    this.tui = new TuiAltScreen(terminal);
+    this.projectNote = options.projectNote;
+    this.keys = options.keys ?? {};
+    this.shellFor = options.shellFor;
+    this.openPort = options.openPort;
+    this.checkMachines = options.checkMachines;
+    this.runShell = options.runShell ?? runInTerminal;
+    this.tui = new TuiAltScreen(options.terminal ?? new ProcessTerminal());
+    this.themes = new ThemeController(this.tui, {
+      themes: options.themes ?? {},
+      setting: options.theme ?? AUTO_THEME,
+      onChange: options.onThemeChange,
+      rebuild: () => this.rebuildScreen(),
+      notify: (message) => {
+        this.statusNote = message;
+      },
+    });
   }
 
   async start(initial: Screen): Promise<void> {
@@ -62,6 +95,7 @@ export class App {
     this.updateHeader();
     this.client.connect();
     this.tui.start();
+    void this.themes.followTerminal();
   }
 
   /** One frame handler; each branch stays a single dispatch. */
@@ -133,6 +167,17 @@ export class App {
     this.screen?.onTasksUpdated?.();
     this.updateHeader();
     this.tui.requestRender();
+    void this.loadProjectNotes();
+  }
+
+  /** Fetch outside status per project; redraw only when something changed. */
+  private async loadProjectNotes(): Promise<void> {
+    if (
+      this.projectNote &&
+      (await refreshNotes(this.projects, this.projectNote, this.projectNotes))
+    ) {
+      this.screen?.onTasksUpdated?.();
+    }
   }
 
   /** Coalesce sync-triggered refreshes so a burst of frames is one round-trip. */
@@ -161,6 +206,9 @@ export class App {
       this.quit();
       return { consume: true };
     }
+    if (this.themes.pickerOpen) {
+      return undefined; // the picker owns the keyboard until it closes
+    }
     if (this.helpOverlay) {
       this.closeHelp();
       return { consume: true };
@@ -182,13 +230,36 @@ export class App {
     this.updateHeader();
   }
 
+  /** Hand the terminal to a shell in the project's folder, then take it back. */
+  openShell(project: Project | undefined): void {
+    const plan = project && this.shellFor?.(project);
+    if (plan) {
+      withTerminalSuspended(this.tui, () => this.runShell(plan));
+    } else {
+      this.statusNote = "no shell for this project (a remote machine needs: dovo add … --ssh)";
+      this.updateHeader();
+      this.tui.requestRender();
+    }
+  }
+
+  showThemePicker(): void {
+    this.themes.showPicker();
+  }
+
+  /** Strings carry their colour, so a new theme means building the screen again. */
+  private rebuildScreen(): void {
+    if (this.screen) {
+      this.show(this.screen.recreate());
+    }
+  }
+
   // --- help overlay ----------------------------------------------------------
 
   showHelp(): void {
     if (this.helpOverlay) {
       return;
     }
-    const view = new HelpView();
+    const view = new HelpView(this.keys);
     view.onKey = () => this.closeHelp();
     this.helpOverlay = this.tui.showOverlay(view, { width: "60%", anchor: "center" });
     this.tui.requestRender();
@@ -204,43 +275,13 @@ export class App {
   }
 
   private headerText(): string {
-    return (
-      t("dovo", colors.accent, { bold: true }) +
-      ` ${this.connectionDot()}${this.statusSuffix()}` +
-      t(`  ${this.countsText()}`, colors.muted) +
-      this.keysHint()
-    );
-  }
-
-  private connectionDot(): string {
-    if (this.phase === "online") {
-      return t("●", colors.ok);
-    }
-    if (this.phase === "connecting" || this.phase === "reconnecting") {
-      return t("●", colors.warn);
-    }
-    return t("●", colors.error);
-  }
-
-  private countsText(): string {
-    if (this.projects.length === 0) {
-      return "—";
-    }
-    return `${this.tasks.length} tasks · ${this.projects.length} projects`;
-  }
-
-  private statusSuffix(): string {
-    if (!this.statusNote) {
-      return "";
-    }
-    return ` · ${this.statusNote}`;
-  }
-
-  private keysHint(): string {
-    if (this.screen?.id === "task") {
-      return t(" esc back  ctrl+c stop", colors.dim);
-    }
-    return t(" n new  r refresh  ? help  ctrl+q quit", colors.dim);
+    return headerText({
+      phase: this.phase,
+      projectCount: this.projects.length,
+      taskCount: this.tasks.length,
+      statusNote: this.statusNote,
+      screenId: this.screen?.id ?? "",
+    });
   }
 }
 

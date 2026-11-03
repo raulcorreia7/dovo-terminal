@@ -1,3 +1,6 @@
+import { assertNever } from "@dovo-terminal/protocol/errors.ts";
+import type { TaskEvent } from "@dovo-terminal/protocol/sync.ts";
+import type { ConversationItem, TaskSummary } from "@dovo-terminal/protocol/workspace.ts";
 import {
   type Component,
   Editor,
@@ -10,23 +13,13 @@ import {
   SelectList,
   VStack,
 } from "@earendil-works/pi-tui";
-import { assertNever } from "dovo-terminal/protocol/errors.ts";
-import type { TaskEvent } from "dovo-terminal/protocol/sync.ts";
-import type { ConversationItem, TaskSummary } from "dovo-terminal/protocol/workspace.ts";
-import type { App } from "dovo-terminal/tui/app.ts";
-import type { ApprovalItem } from "dovo-terminal/tui/items.ts";
-import { LineText } from "dovo-terminal/tui/line.ts";
-import type { Screen } from "dovo-terminal/tui/screen.ts";
-import { colors, editorBorder, selectListTheme, t } from "dovo-terminal/tui/theme.ts";
-import { TranscriptView } from "dovo-terminal/tui/transcript.ts";
-
-const statusText: Record<TaskSummary["status"], string> = {
-  running: t("● running", colors.ok),
-  waiting: t("● waiting for you", colors.warn),
-  idle: t("○ idle", colors.muted),
-  error: t("✗ error", colors.error),
-  unknown: t("? unknown", colors.dim),
-};
+import type { App } from "../app.ts";
+import type { ApprovalItem } from "../items.ts";
+import { LineText } from "../line.ts";
+import type { Screen } from "../screen.ts";
+import { statusLabel } from "../status.ts";
+import { colors, editorBorder, selectListTheme, t } from "../theme/index.ts";
+import { TranscriptView } from "../transcript.ts";
 
 export class TaskScreen implements Screen {
   readonly id = "task";
@@ -63,6 +56,10 @@ export class TaskScreen implements Screen {
       "agent is working",
     );
     this.setStatus(task.status);
+  }
+
+  recreate(): Screen {
+    return new TaskScreen(this.app, this.task);
   }
 
   build(): { root: VStack; focus?: Component } {
@@ -130,7 +127,7 @@ export class TaskScreen implements Screen {
         this.approvalOverlay?.hide();
         return true;
       }
-      void import("dovo-terminal/tui/screens/tasklist.ts").then(({ TaskListScreen }) =>
+      void import("./tasklist.ts").then(({ TaskListScreen }) =>
         this.app.show(new TaskListScreen(this.app)),
       );
       return true;
@@ -141,7 +138,7 @@ export class TaskScreen implements Screen {
           this.app.statusNote = `stop failed: ${String(error)}`;
         });
       } else {
-        void import("dovo-terminal/tui/screens/tasklist.ts").then(({ TaskListScreen }) =>
+        void import("./tasklist.ts").then(({ TaskListScreen }) =>
           this.app.show(new TaskListScreen(this.app)),
         );
       }
@@ -186,7 +183,7 @@ export class TaskScreen implements Screen {
     return (
       t(` ${this.task.title || "(untitled)"} `, colors.text, { bold: true }) +
       t(
-        ` ${project?.name ?? "?"} · ${this.task.provider} · ${statusText[this.taskStatus]}`,
+        ` ${project?.name ?? "?"} · ${this.task.provider} · ${statusLabel(this.taskStatus)}`,
         colors.muted,
       )
     );

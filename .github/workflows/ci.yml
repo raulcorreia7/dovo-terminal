@@ -7,10 +7,12 @@ on:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        # the two supported platforms; Windows is out of scope for now.
+        os: [ubuntu-latest, macos-latest]
         # engines says >=22.19; prove the floor and the current LTS line.
         node: ["22.19", "22", "24"]
     steps:
@@ -22,3 +24,4 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run verify
+      - run: pnpm run audit

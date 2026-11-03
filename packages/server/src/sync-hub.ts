@@ -1,7 +1,7 @@
 // Fan-out from one upstream RuntimeClient to every connected /ws/sync peer.
 // Pure plumbing: no frame inspection, no retry - clients reconnect themselves.
 
-import type { SyncFrame } from "dovo-terminal/protocol/sync.ts";
+import type { SyncFrame } from "@dovo-terminal/protocol/sync.ts";
 import type { WebSocket } from "ws";
 
 export class SyncHub {

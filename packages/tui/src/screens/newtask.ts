@@ -1,3 +1,4 @@
+import type { ModelOption } from "@dovo-terminal/protocol/workspace.ts";
 import {
   type Component,
   Editor,
@@ -7,15 +8,27 @@ import {
   SelectList,
   VStack,
 } from "@earendil-works/pi-tui";
-import type { App } from "dovo-terminal/tui/app.ts";
-import { LineText } from "dovo-terminal/tui/line.ts";
-import type { Screen } from "dovo-terminal/tui/screen.ts";
-import { colors, editorBorder, selectListTheme, t } from "dovo-terminal/tui/theme.ts";
+import type { App } from "../app.ts";
+import { LineText } from "../line.ts";
+import type { Screen } from "../screen.ts";
+import { colors, editorBorder, selectListTheme, t } from "../theme/index.ts";
 
 export type NewTaskStep =
   | { kind: "project" }
   | { kind: "provider"; projectId: string }
-  | { kind: "prompt"; projectId: string; providerId: string };
+  | { kind: "model"; projectId: string; providerId: string; models: ModelOption[] }
+  | {
+      kind: "prompt";
+      projectId: string;
+      providerId: string;
+      /** The model id chosen; empty means the harness's default. */
+      model: string;
+      /** The catalog the model step offered, so back can return to it. Empty if none was shown. */
+      models: ModelOption[];
+    };
+
+/** A catalog this short is no choice: skip the step. */
+const MIN_MODELS_TO_ASK = 2;
 
 /**
  * Each step is shown by re-entering this screen with the next step: the step
@@ -30,6 +43,10 @@ export class NewTaskScreen implements Screen {
   constructor(app: App, step: NewTaskStep = { kind: "project" }) {
     this.app = app;
     this.step = step;
+  }
+
+  recreate(): Screen {
+    return new NewTaskScreen(this.app, this.step);
   }
 
   build(): { root: VStack; focus?: Component } {
@@ -50,14 +67,17 @@ export class NewTaskScreen implements Screen {
   }
 
   private back(): void {
-    if (this.step.kind === "prompt") {
+    if (this.step.kind === "prompt" && this.step.models.length > 0) {
+      const { projectId, providerId, models } = this.step;
+      this.app.show(new NewTaskScreen(this.app, { kind: "model", projectId, providerId, models }));
+    } else if (this.step.kind === "prompt" || this.step.kind === "model") {
       this.app.show(
         new NewTaskScreen(this.app, { kind: "provider", projectId: this.step.projectId }),
       );
     } else if (this.step.kind === "provider") {
       this.app.show(new NewTaskScreen(this.app, { kind: "project" }));
     } else {
-      void import("dovo-terminal/tui/screens/tasklist.ts").then(({ TaskListScreen }) =>
+      void import("./tasklist.ts").then(({ TaskListScreen }) =>
         this.app.show(new TaskListScreen(this.app)),
       );
     }
@@ -70,7 +90,43 @@ export class NewTaskScreen implements Screen {
     if (this.step.kind === "provider") {
       return t("New task — choose agent", colors.accent, { bold: true });
     }
-    return t("New task — describe the work (enter to start)", colors.accent, { bold: true });
+    if (this.step.kind === "model") {
+      return t("New task — choose model", colors.accent, { bold: true });
+    }
+    const choice = [this.providerLabel(this.step.providerId), this.modelLabel(this.step)]
+      .filter(Boolean)
+      .join(" · ");
+
+    return (
+      t("New task — describe the work (enter to start)", colors.accent, { bold: true }) +
+      t(`  ${choice}`, colors.muted)
+    );
+  }
+
+  private providerLabel(providerId: string): string {
+    return this.app.providers.find((provider) => provider.id === providerId)?.label ?? providerId;
+  }
+
+  private modelLabel(step: { model: string; models: ModelOption[] }): string {
+    return step.models.find((model) => model.id === step.model)?.label ?? step.model;
+  }
+
+  /** Ask for a model only when the harness offers a real choice; otherwise go straight to the prompt. */
+  private async chooseProvider(projectId: string, providerId: string): Promise<void> {
+    const models = await this.app.client.listModels(providerId).catch(() => []);
+    if (models.length >= MIN_MODELS_TO_ASK) {
+      this.app.show(new NewTaskScreen(this.app, { kind: "model", projectId, providerId, models }));
+    } else {
+      this.app.show(
+        new NewTaskScreen(this.app, {
+          kind: "prompt",
+          projectId,
+          providerId,
+          model: "",
+          models: [],
+        }),
+      );
+    }
   }
 
   private renderStep(): { body: Component; focus: Component } {
@@ -84,7 +140,7 @@ export class NewTaskScreen implements Screen {
       list.onSelect = (item) =>
         this.app.show(new NewTaskScreen(this.app, { kind: "provider", projectId: item.value }));
       list.onCancel = () =>
-        void import("dovo-terminal/tui/screens/tasklist.ts").then(({ TaskListScreen }) =>
+        void import("./tasklist.ts").then(({ TaskListScreen }) =>
           this.app.show(new TaskListScreen(this.app)),
         );
       return { body: list, focus: list };
@@ -96,28 +152,54 @@ export class NewTaskScreen implements Screen {
         label: provider.label,
       }));
       const list = new SelectList(items, this.listHeight(), selectListTheme);
-      list.onSelect = (item) =>
-        this.app.show(
-          new NewTaskScreen(this.app, {
-            kind: "prompt",
-            projectId,
-            providerId: item.value,
-          }),
-        );
+      list.onSelect = (item) => void this.chooseProvider(projectId, item.value);
       list.onCancel = () => this.app.show(new NewTaskScreen(this.app, { kind: "project" }));
       return { body: list, focus: list };
     }
-    const projectId = this.step.projectId;
-    const providerId = this.step.providerId;
+    if (this.step.kind === "model") {
+      return this.renderModelStep(this.step);
+    }
+    const { projectId, providerId, model } = this.step;
     const editor = new Editor(this.app.tui, {
       borderColor: editorBorder,
       selectList: selectListTheme,
     });
-    editor.onSubmit = (text) => void this.create(projectId, providerId, text);
+    editor.onSubmit = (text) => void this.create(projectId, providerId, model, text);
     return { body: editor, focus: editor };
   }
 
-  private async create(projectId: string, providerId: string, prompt: string): Promise<void> {
+  private renderModelStep(step: { projectId: string; providerId: string; models: ModelOption[] }): {
+    body: Component;
+    focus: Component;
+  } {
+    const { projectId, providerId, models } = step;
+    const items: SelectItem[] = [
+      { value: "", label: "default", description: "the harness picks" },
+      ...models.map((model) => ({ value: model.id, label: model.label, description: model.id })),
+    ];
+    const list = new SelectList(items, this.listHeight(), selectListTheme);
+    list.onSelect = (item) =>
+      this.app.show(
+        new NewTaskScreen(this.app, {
+          kind: "prompt",
+          projectId,
+          providerId,
+          model: item.value,
+          models,
+        }),
+      );
+    list.onCancel = () =>
+      this.app.show(new NewTaskScreen(this.app, { kind: "provider", projectId }));
+
+    return { body: list, focus: list };
+  }
+
+  private async create(
+    projectId: string,
+    providerId: string,
+    model: string,
+    prompt: string,
+  ): Promise<void> {
     if (!prompt.trim()) {
       return;
     }
@@ -125,9 +207,10 @@ export class NewTaskScreen implements Screen {
       const task = await this.app.client.createTask({
         projectId,
         providerId,
+        ...(model && { model }),
         prompt: prompt.trim(),
       });
-      void import("dovo-terminal/tui/screens/task.ts").then(({ TaskScreen }) =>
+      void import("./task.ts").then(({ TaskScreen }) =>
         this.app.show(new TaskScreen(this.app, task)),
       );
     } catch (error) {

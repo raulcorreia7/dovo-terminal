@@ -1,22 +1,52 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { guard } from "dovo-terminal/protocol/guard.ts";
+import type { RuntimeConfig } from "@dovo-terminal/client/dovo.ts";
+import { guard } from "@dovo-terminal/protocol/guard.ts";
 import { z } from "zod";
-
-export interface RuntimeConfig {
-  url: string;
-  /** absent means "discover one" (env, connection file, owner-token file) */
-  token?: string | undefined;
-}
 
 // Files on disk are external input: hand-edited, half-written, stale. Both
 // readers validate through zod first; loose objects keep unrelated keys intact.
-const RuntimeProfileSchema = z.looseObject({ url: z.string(), token: z.string().optional() });
+const RuntimeProfileSchema = z.looseObject({
+  url: z.string(),
+  token: z.string().optional(),
+  /** Reach this runtime through `ssh -L` to this host (user@host or a Host alias). */
+  ssh: z.string().optional(),
+  /** Base URL of this machine's A2A agent, if it serves one (checked by the Machines screen). */
+  a2a: z.string().optional(),
+  /** "agent": this machine is an A2A worker, not a Dovo runtime. */
+  kind: z.enum(["dovo", "agent"]).optional(),
+});
 export type RuntimeProfile = z.infer<typeof RuntimeProfileSchema>;
 
 const ConfigSchema = z.looseObject({
   current: z.string(),
+  /** A theme id, or "auto" to follow the terminal. */
+  theme: z.string().optional(),
+  /** A Teams webhook URL (https) to post to when a task needs you or finishes. */
+  teamsWebhook: z.string().optional(),
+  /** Show each project's pull request and checks, via the `gh` CLI. Off by default. */
+  github: z.boolean().optional(),
+  /** Agents every machine should offer, e.g. ["codex", "opencode"]; the Machines screen flags the missing. */
+  expect: z.array(z.string()).optional(),
+  /** This worker's A2A access token; made on first use, replaced by `dovo a2a-token --rotate`. */
+  a2aToken: z.string().optional(),
+  /** Limit what A2A callers may run on this worker. */
+  a2aAllow: z
+    .object({ projects: z.array(z.string()).optional(), providers: z.array(z.string()).optional() })
+    .optional(),
+  /** The address other machines should use to reach this worker (behind a proxy or mesh). */
+  a2aPublicUrl: z.string().optional(),
+  /** Replace task-list keys by action name, e.g. { "new": "c" }. */
+  keys: z.record(z.string(), z.string()).optional(),
   runtimes: z.record(z.string(), RuntimeProfileSchema),
 });
 export type Config = z.infer<typeof ConfigSchema>;
@@ -24,6 +54,7 @@ export type Config = z.infer<typeof ConfigSchema>;
 // Defaults that Dovo itself publishes (apps/api: connection.ts, owner-token.ts,
 // dev-environment.ts). Keep them here, in one table, never inline.
 export const DEFAULT_PRODUCTION_ORIGIN = "http://127.0.0.1:8787";
+const TOKEN_BYTES = 24;
 const TOKEN_MIN_LENGTH = 32; // the runtime rejects device tokens below this
 const DOVO_DATA_DIR = ".dovo";
 const DOVO_DEV_DATA_DIR = ".dovo-dev";
@@ -37,27 +68,69 @@ const ConnectionFileSchema = z.looseObject({
   pid: z.number().int().min(1),
 });
 
-const CONFIG_PATH = join(homedir(), ".config", "dovo-terminal", "config.json");
+// ~/.config on macOS and Linux alike (the usual place for command-line tools on
+// both); Linux users who set XDG_CONFIG_HOME get that instead.
+const CONFIG_PATH = join(
+  process.env["XDG_CONFIG_HOME"] ?? join(homedir(), ".config"),
+  "dovo-terminal",
+  "config.json",
+);
 
-export function configPath(): string {
+function configPath(): string {
   return process.env["DOVO_TUI_CONFIG"] ?? CONFIG_PATH;
 }
 
+/** Where user theme files live: `themes/` beside the config file. */
+/** A file kept beside the config, e.g. the A2A task database. */
+export function dataPath(name: string): string {
+  return join(dirname(configPath()), name);
+}
+
+/** The A2A token to use: the environment's, else the saved one, else a new one saved now. */
+export function a2aTokenFor(config: Config, fromEnv: string | undefined): string {
+  if (fromEnv) {
+    return fromEnv;
+  }
+  if (config.a2aToken) {
+    return config.a2aToken;
+  }
+  const made = newToken();
+  config.a2aToken = made;
+  saveConfig(config);
+
+  return made;
+}
+
+export function newToken(): string {
+  return randomBytes(TOKEN_BYTES).toString("base64url");
+}
+
+export function themesDir(): string {
+  return join(dirname(configPath()), "themes");
+}
+
 export function loadConfig(): Config {
+  const path = configPath();
   try {
-    const text = readFileSync(configPath(), "utf8");
-    const decoded = JSON.parse(text);
-    return guard(ConfigSchema, decoded);
+    return guard(ConfigSchema, JSON.parse(readFileSync(path, "utf8")));
   } catch {
-    // no file yet, or a file this version cannot read: start from defaults
+    // No file yet is normal. A file that exists but cannot be read is kept as
+    // `.bak` first: the next save would otherwise replace someone's profiles and
+    // tokens with the defaults.
+    if (existsSync(path)) {
+      copyFileSync(path, `${path}.bak`);
+    }
+
     return { current: "local", runtimes: { local: { url: DEFAULT_PRODUCTION_ORIGIN } } };
   }
 }
 
 export function saveConfig(config: Config): void {
   const path = configPath();
-  mkdirSync(dirname(path), { recursive: true });
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  // `mode` above only applies when the file is created; tighten an older one.
+  chmodSync(path, 0o600);
 }
 
 /** A stored profile token, usable only if it could be a real runtime token. */
@@ -212,7 +285,7 @@ function discoverOwnerToken(): string | undefined {
 const TRAILING_SLASHES = /\/+$/u;
 const FULL_ORIGIN = /^https?:\/\//u;
 
-export function normalizeUrl(url: string): string {
+function normalizeUrl(url: string): string {
   const trimmed = url.replace(TRAILING_SLASHES, "");
   if (FULL_ORIGIN.test(trimmed)) {
     return trimmed;

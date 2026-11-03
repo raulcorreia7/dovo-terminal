@@ -59,8 +59,19 @@ export const WireQuestionSchema = Loose({
 });
 export type WireQuestion = z.infer<typeof WireQuestionSchema>;
 
+const WireDeviceSchema = Loose({ id: z.string(), name: z.string().optional() });
+export type WireDevice = z.infer<typeof WireDeviceSchema>;
+
+/** Reply to `POST /api/pair/code`; the expiry is a timestamp or an ISO string. */
+export const InviteReplySchema = Loose({
+  code: z.string(),
+  expiresAt: z.union([z.string(), z.number()]).optional(),
+});
+
 export const SnapshotSchema = Loose({
   runtimeInstanceId: z.string().optional(),
+  devices: z.array(WireDeviceSchema).optional(),
+  pendingDevices: z.array(WireDeviceSchema).optional(),
   approvals: z.array(WireApprovalSchema).optional(),
   questions: z.array(WireQuestionSchema).optional(),
   workspace: Loose({
@@ -70,6 +81,22 @@ export const SnapshotSchema = Loose({
   }).optional(),
 });
 export type WireSnapshot = z.infer<typeof SnapshotSchema>;
+
+// The model catalog's entry shape is not pinned down by the published contract
+// (docs/dovo-api-contract.md says only `{models, reasoning}`), so an entry may
+// be a bare id or an object naming itself under any usual key. Entries that
+// name nothing are dropped rather than failing the whole catalog.
+const ModelEntrySchema = z.union([
+  z.string(),
+  Loose({
+    id: z.string().optional(),
+    value: z.string().optional(),
+    name: z.string().optional(),
+    label: z.string().optional(),
+  }),
+]);
+export const AgentModelsSchema = Loose({ models: z.array(ModelEntrySchema).default([]) });
+export type WireModelEntry = Exclude<z.infer<typeof ModelEntrySchema>, string>;
 
 const AgentAvailabilitySchema = Loose({ id: z.string(), available: z.boolean() });
 export const AgentAvailabilityListSchema = z.array(AgentAvailabilitySchema);

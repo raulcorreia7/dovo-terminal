@@ -10,7 +10,13 @@
 // server.test.ts / integration.test.ts; the UI smoke test uses DemoClient.
 import http from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
-import { createDovoClient } from "dovo-terminal/client/dovo.ts";
+import { errorMessage } from "@dovo-terminal/protocol/errors.ts";
+import { guard } from "@dovo-terminal/protocol/guard.ts";
+import type { TaskEvent } from "@dovo-terminal/protocol/sync.ts";
+import type { WebSocket as ClientSocket } from "ws";
+import { WebSocketServer } from "ws";
+import { z } from "zod";
+import { createDovoClient } from "../src/dovo.ts";
 import {
   ApprovalBodySchema,
   CancelTaskBodySchema,
@@ -18,13 +24,7 @@ import {
   MessageBodySchema,
   type SyncInputFrame,
   SyncInputFrameSchema,
-} from "dovo-terminal/client/dovo-wire.ts";
-import { errorMessage } from "dovo-terminal/protocol/errors.ts";
-import { guard } from "dovo-terminal/protocol/guard.ts";
-import type { TaskEvent } from "dovo-terminal/protocol/sync.ts";
-import type { WebSocket as ClientSocket } from "ws";
-import { WebSocketServer } from "ws";
-import { z } from "zod";
+} from "../src/dovo-wire.ts";
 
 const { WebSocket } = await import("ws");
 // the client uses the global WebSocket; back it with the ws polyglot impl

@@ -1,5 +1,5 @@
 import { type Component, truncateToWidth } from "@earendil-works/pi-tui";
-import { colors, t } from "../theme.ts";
+import { colors, t } from "../theme/index.ts";
 
 export class SystemItem implements Component {
   private text: string;

@@ -87,7 +87,7 @@
     {
       // Screens navigate to each other; the graph is cyclic by design and the
       // loads are dynamic so no evaluation order is coupled.
-      "includes": ["src/tui/screens/**"],
+      "includes": ["packages/tui/src/screens/**"],
       "linter": {
         "rules": {
           "suspicious": { "noImportCycles": "off" }
@@ -98,7 +98,7 @@
       // Test code: sleep-and-retry waiters must await inside loops, and
       // assertions belong in the shared helpers. Scenarios read linearly by
       // design; splitting a contract walkthrough into snippets hides bugs.
-      "includes": ["test/**"],
+      "includes": ["packages/*/test/**"],
       "linter": {
         "rules": {
           "performance": { "noAwaitInLoops": "off" },
@@ -111,13 +111,45 @@
       }
     },
     {
+      // ssh option names such as ExitOnForwardFailure look like secrets to the
+      // entropy check; they are fixed protocol words, not credentials.
+      "includes": ["packages/cli/src/tunnel.ts", "packages/cli/test/tunnel.test.ts"],
+      "linter": {
+        "rules": {
+          "security": { "noSecrets": "off" }
+        }
+      }
+    },
+    {
+      // drizzle-kit loads its config by default export; that is its contract.
+      "includes": ["packages/a2a/drizzle.config.ts"],
+      "linter": {
+        "rules": {
+          "style": { "noDefaultExport": "off" }
+        }
+      }
+    },
+    {
+      // The real client and the federation each implement the whole RuntimeClient
+      // interface in one class; length follows the interface, and each method delegates.
+      "includes": ["packages/client/src/dovo.ts", "packages/client/src/federated.ts"],
+      "linter": {
+        "rules": {
+          "style": { "noExcessiveLinesPerFile": "off" }
+        }
+      }
+    },
+    {
       // The demo runtime is a synchronous in-memory stand-in behind the
       // Promise-shaped RuntimeClient interface; sync methods returning
       // Promises without await are the point.
-      "includes": ["src/client/demo.ts"],
+      "includes": ["packages/client/src/demo.ts", "packages/client/src/demo-devices.ts"],
       "linter": {
         "rules": {
-          "suspicious": { "useAwait": "off" }
+          "suspicious": { "useAwait": "off" },
+          // One class implements the whole RuntimeClient interface, so its
+          // length follows the interface; nothing in it is separable.
+          "style": { "noExcessiveLinesPerFile": "off" }
         }
       }
     },
@@ -125,7 +157,11 @@
       // Component no-ops: pi-tui's Component contract requires invalidate()
       // and the headless-terminal writer needs do-nothing members; upstream
       // pi-tui itself ships `invalidate(): void {}`.
-      "includes": ["src/tui/items/**", "src/tui/line.ts", "test/smoke.ts"],
+      "includes": [
+        "packages/tui/src/items/**",
+        "packages/tui/src/line.ts",
+        "packages/cli/test/smoke.ts"
+      ],
       "linter": {
         "rules": {
           "suspicious": { "noEmptyBlockStatements": "off" }
@@ -135,7 +171,7 @@
     {
       // The items barrel is the stable import surface for item views; one
       // class per file is required elsewhere, so re-exports are the point.
-      "includes": ["src/tui/items.ts"],
+      "includes": ["packages/tui/src/items.ts"],
       "linter": {
         "rules": {
           "performance": { "noBarrelFile": "off" }
@@ -145,7 +181,7 @@
     {
       // @xterm/headless ships no "exports" map; Node and tsc resolve the
       // bare specifier, biome's module resolver cannot.
-      "includes": ["test/smoke.ts", "test/smoke-terminal.ts"],
+      "includes": ["packages/cli/test/smoke.ts", "packages/cli/test/smoke-terminal.ts"],
       "linter": {
         "rules": {
           "correctness": { "noUnresolvedImports": "off" }
@@ -168,6 +204,7 @@
   },
 
   "files": {
-    "includes": ["**", "!!node_modules", "!!package-lock.json"]
+    // DESIGN.md's YAML front matter follows the DESIGN.md spec; a formatter must not reflow it.
+    "includes": ["**", "!!node_modules", "!!package-lock.json", "!DESIGN.md"]
   }
 }

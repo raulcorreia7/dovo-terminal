@@ -3,12 +3,13 @@
 // the same zod schema the client uses, so nothing enters the interface
 // untyped and there is no casting anywhere on this path.
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { DovoError } from "@dovo-terminal/protocol/errors.ts";
+import { ENDPOINTS } from "@dovo-terminal/protocol/http.ts";
+import type { RuntimeClient } from "@dovo-terminal/protocol/runtime-client.ts";
+import { UnsupportedError } from "@dovo-terminal/protocol/unsupported-error.ts";
+import { UpstreamError } from "@dovo-terminal/protocol/upstream-error.ts";
+import { CreateTaskInputSchema, DeviceDecisionSchema } from "@dovo-terminal/protocol/workspace.ts";
 import { z } from "zod";
-import type { RuntimeClient } from "../client/runtime-client.ts";
-import { DovoError } from "../protocol/errors.ts";
-import { ENDPOINTS } from "../protocol/http.ts";
-import { UpstreamError } from "../protocol/upstream-error.ts";
-import { CreateTaskInputSchema } from "../protocol/workspace.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const STATUS = {
@@ -16,6 +17,7 @@ const STATUS = {
   noContent: 204,
   badRequest: 400,
   notFound: 404,
+  notImplemented: 501,
   badGateway: 502,
   internalError: 500,
 } as const;
@@ -24,6 +26,7 @@ const TaskIdBody = z.object({ taskId: z.string().min(1) });
 const MessageBody = TaskIdBody.extend({ text: z.string().min(1) });
 const LifecycleBody = TaskIdBody.extend({ action: z.enum(["archive", "restore", "delete"]) });
 const AnswerBody = TaskIdBody.extend({ itemId: z.string().min(1), answer: z.string() });
+const DeviceBody = z.object({ deviceId: z.string().min(1), decision: DeviceDecisionSchema });
 const ViewBody = z.object({ taskId: z.string().min(1).nullable() });
 
 interface Route {
@@ -35,7 +38,40 @@ interface Route {
 const ROUTES: Route[] = [
   { method: "GET", path: ENDPOINTS.projects, handle: (c) => c.listProjects() },
   { method: "GET", path: ENDPOINTS.providers, handle: (c) => c.listProviders() },
+  {
+    method: "GET",
+    path: ENDPOINTS.models,
+    handle: (c, _request, query) => c.listModels(queryParam(query, "provider")),
+  },
+  {
+    method: "GET",
+    path: ENDPOINTS.devices,
+    handle: (c) => capability(c.devices, "devices").list(),
+  },
+  {
+    method: "POST",
+    path: ENDPOINTS.invite,
+    handle: (c) => capability(c.devices, "devices").invite(),
+  },
+  {
+    method: "POST",
+    path: ENDPOINTS.deviceDecision,
+    handle: async (c, request) => {
+      const { deviceId, decision } = DeviceBody.parse(await readJson(request));
+      await capability(c.devices, "devices").decide(deviceId, decision);
+    },
+  },
+  {
+    method: "GET",
+    path: ENDPOINTS.ports,
+    handle: (c) => capability(c.ports, "services").list(),
+  },
   { method: "GET", path: ENDPOINTS.tasks, handle: (c) => c.listTasks() },
+  {
+    method: "GET",
+    path: ENDPOINTS.archived,
+    handle: (c) => capability(c.archive, "archived tasks").list(),
+  },
   {
     method: "GET",
     path: ENDPOINTS.taskHistory,
@@ -123,6 +159,15 @@ export async function handleRequest(
   }
 }
 
+/** An optional ability of the backend, or a clear "not supported" (HTTP 501). */
+function capability<T>(ability: T | undefined, name: string): T {
+  if (!ability) {
+    throw new UnsupportedError(`this runtime does not support ${name}`);
+  }
+
+  return ability;
+}
+
 /** A query-string parameter, validated like any other input. */
 function queryParam(query: URLSearchParams, name: string): string {
   const value = z.string().min(1).safeParse(query.get(name));
@@ -153,6 +198,9 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
  *   anything else          -> 500
  */
 function statusFor(error: unknown): number {
+  if (error instanceof UnsupportedError) {
+    return STATUS.notImplemented;
+  }
   const upstream = upstreamOf(error);
   if (upstream) {
     return upstream.status >= STATUS.badRequest ? upstream.status : STATUS.badGateway;

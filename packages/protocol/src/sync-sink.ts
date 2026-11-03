@@ -1,6 +1,6 @@
 // Fan-out used by every RuntimeClient and the local server: typed frames in,
 // listener callbacks out. Pure delivery; no buffering, no retry semantics.
-import type { SyncFrame, SyncListener, Unsubscribe } from "dovo-terminal/protocol/sync.ts";
+import type { SyncFrame, SyncListener, Unsubscribe } from "./sync.ts";
 
 /** Minimal typed fan-out used by every RuntimeClient and the local server. */
 export class SyncSink {

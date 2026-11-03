@@ -1,41 +1,20 @@
+import type { Project } from "@dovo-terminal/protocol/workspace.ts";
 import {
   type Component,
   Editor,
   Key,
   matchesKey,
-  type OverlayHandle,
-  type SelectItem,
   SelectList,
   VStack,
 } from "@earendil-works/pi-tui";
-import { errorMessage } from "dovo-terminal/protocol/errors.ts";
-import type { TaskStatus } from "dovo-terminal/protocol/workspace.ts";
-import { type App, note } from "dovo-terminal/tui/app.ts";
-import { ConfirmPrompt } from "dovo-terminal/tui/confirm.ts";
-import type { Screen } from "dovo-terminal/tui/screen.ts";
-import { colors, editorBorder, selectListTheme, t } from "dovo-terminal/tui/theme.ts";
-
-const statusGlyph: Record<TaskStatus, string> = {
-  running: t("●", colors.ok),
-  waiting: t("●", colors.warn),
-  idle: t("○", colors.muted),
-  error: t("✗", colors.error),
-  unknown: t("?", colors.dim),
-};
-
-function relativeTime(ts: number): string {
-  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (s < 60) {
-    return `${s}s`;
-  }
-  if (s < 3600) {
-    return `${Math.floor(s / 60)}m`;
-  }
-  if (s < 86_400) {
-    return `${Math.floor(s / 3600)}h`;
-  }
-  return `${Math.floor(s / 86_400)}d`;
-}
+import { type App, note } from "../app.ts";
+import { type ListAction, pressed } from "../keys.ts";
+import { PortOverlay } from "../port-overlay.ts";
+import type { Screen } from "../screen.ts";
+import { toSelectItem } from "../task-items.ts";
+import { TaskRemoval } from "../task-removal.ts";
+import { buildRows, PROJECT_PREFIX, rowKey, type TreeRow } from "../task-rows.ts";
+import { colors, editorBorder, selectListTheme } from "../theme/index.ts";
 
 export class TaskListScreen implements Screen {
   readonly id = "tasks";
@@ -43,17 +22,29 @@ export class TaskListScreen implements Screen {
   private root = new VStack();
   private filter: Editor;
   private list: SelectList | null = null;
+  private rows: TreeRow[] = [];
+  private query: string = "";
   private filterFocused: boolean = false;
-  private confirmOverlay: OverlayHandle | null = null;
+  private readonly removal: TaskRemoval;
+  private readonly ports: PortOverlay;
 
   constructor(app: App) {
     this.app = app;
+    this.removal = new TaskRemoval(app);
+    this.ports = new PortOverlay(app);
     this.filter = new Editor(this.app.tui, {
       borderColor: editorBorder,
       selectList: selectListTheme,
     });
     this.filter.onSubmit = () => this.app.tui.setFocus(this.list);
-    this.filter.onChange = (text) => this.list?.setFilter(text.trim());
+    this.filter.onChange = (text) => {
+      this.query = text.trim();
+      this.reshape();
+    };
+  }
+
+  recreate(): Screen {
+    return new TaskListScreen(this.app);
   }
 
   build(): { root: VStack; focus?: Component | undefined } {
@@ -63,12 +54,13 @@ export class TaskListScreen implements Screen {
   }
 
   onTasksUpdated(): void {
-    this.rebuildList();
-    const { focus } = this.compose();
-    this.list?.setFilter(this.filter.getText().trim());
-    if (!this.filterFocused && focus) {
-      this.app.tui.setFocus(focus);
-    }
+    this.reshape();
+  }
+
+  /** Rebuild rows and list, keep the selection on the same row, and redraw. */
+  private reshape(prefer?: string): void {
+    this.rebuildList(prefer);
+    this.refocus(this.compose().focus);
     this.app.tui.requestRender();
   }
 
@@ -77,7 +69,7 @@ export class TaskListScreen implements Screen {
     // The App keeps THIS VStack instance; mutate it, never replace it.
     this.root.clear();
     this.root.addChild(this.filter, { basis: "auto" });
-    if (this.app.tasks.length === 0) {
+    if (this.rows.length === 0) {
       const empty = note(this.emptyHint(), colors.dim);
       this.root.addChild(empty, { grow: 1, basis: 0 });
       return { focus: empty };
@@ -95,6 +87,9 @@ export class TaskListScreen implements Screen {
   }
 
   private emptyHint(): string {
+    if (this.query) {
+      return `no task matches "${this.query}"`;
+    }
     if (this.app.online) {
       return "no tasks yet. press n to create one";
     }
@@ -102,108 +97,183 @@ export class TaskListScreen implements Screen {
   }
 
   onConnection(): void {
-    const { focus } = this.compose();
-    if (focus && !this.filterFocused) {
+    this.refocus(this.compose().focus);
+  }
+
+  /** Give the list focus after a rebuild, unless the filter or an overlay holds the keyboard. */
+  private refocus(focus: Component | undefined): void {
+    if (focus && !this.filterFocused && !this.app.tui.hasOverlay()) {
       this.app.tui.setFocus(focus);
     }
   }
 
   handleKey(data: string): boolean {
-    if (!this.filterFocused && matchesKey(data, "n")) {
-      // Dynamic import: static ones would cycle, screens navigate back here.
-      void import("dovo-terminal/tui/screens/newtask.ts").then(({ NewTaskScreen }) =>
-        this.app.show(new NewTaskScreen(this.app)),
-      );
-      return true;
+    if (this.filterFocused) {
+      return this.handleFilterKey(data);
     }
-    if (!this.filterFocused && matchesKey(data, "r")) {
-      void this.app.refresh();
-      return true;
+    if (this.app.tui.hasOverlay()) {
+      return false; // the overlay on top owns the keys
     }
-    if (!this.filterFocused && matchesKey(data, "/")) {
-      this.filterFocused = true;
-      this.app.tui.setFocus(this.filter);
-      return true;
-    }
-    if (!this.filterFocused && matchesKey(data, Key.question)) {
-      this.app.showHelp();
-      return true;
-    }
-    if (!this.filterFocused && (matchesKey(data, "d") || matchesKey(data, Key.shift("d")))) {
-      this.confirmRemove(matchesKey(data, Key.shift("d")));
-      return true;
-    }
-    if (this.filterFocused && matchesKey(data, Key.escape)) {
-      this.filterFocused = false;
-      this.filter.setText("");
-      this.list?.setFilter("");
-      this.app.tui.setFocus(this.list);
-      return true;
-    }
-    return false;
+
+    return this.handleListKey(data);
   }
 
-  /** Removal is destructive, so it asks first; the overlay swallows every key. */
+  /** What each action does while the list has focus; first match wins (delete before archive). */
+  private listActions(): [ListAction, () => void][] {
+    return [
+      ["new", () => this.openNewTask()],
+      ["refresh", () => void this.app.refresh()],
+      ["theme", () => this.app.showThemePicker()],
+      ["invite", () => this.openInvite()],
+      ["shell", () => this.openShell()],
+      ["open", () => void this.ports.open(this.selectedProject()?.id)],
+      ["machines", () => this.openMachines()],
+      ["unfold", () => this.expandSelected()],
+      ["fold", () => this.collapseSelected()],
+      ["search", () => this.focusFilter()],
+      ["help", () => this.app.showHelp()],
+      ["delete", () => this.confirmRemove(true)],
+      ["archive", () => this.confirmRemove(false)],
+    ];
+  }
+
+  private handleListKey(data: string): boolean {
+    const binding = this.listActions().find(([action]) => pressed(data, action, this.app.keys));
+    if (!binding) {
+      return false;
+    }
+
+    binding[1]();
+
+    return true;
+  }
+
+  private handleFilterKey(data: string): boolean {
+    if (!matchesKey(data, Key.escape)) {
+      return false;
+    }
+
+    this.filterFocused = false;
+    this.filter.setText("");
+    this.query = "";
+    this.reshape();
+    this.app.tui.setFocus(this.list);
+
+    return true;
+  }
+
+  private focusFilter(): void {
+    this.filterFocused = true;
+    this.app.tui.setFocus(this.filter);
+  }
+
+  /** The project under the cursor: the project row itself, or the project of a task row. */
+  private selectedProject(): Project | undefined {
+    const row = this.selectedRow();
+    const projectId = row?.kind === "project" ? row.project.id : row?.task.projectId;
+
+    return this.app.projects.find((project) => project.id === projectId);
+  }
+
+  private openShell(): void {
+    this.app.openShell(this.selectedProject());
+  }
+
+  private openMachines(): void {
+    void import("./machines.ts").then(({ MachinesScreen }) =>
+      this.app.show(new MachinesScreen(this.app)),
+    );
+  }
+
+  private openInvite(): void {
+    void import("./devices.ts").then(({ DevicesScreen }) =>
+      this.app.show(new DevicesScreen(this.app)),
+    );
+  }
+
+  private openNewTask(): void {
+    // Dynamic import: static ones would cycle, screens navigate back here.
+    void import("./newtask.ts").then(({ NewTaskScreen }) =>
+      this.app.show(new NewTaskScreen(this.app)),
+    );
+  }
+
+  private rowFor(value: string | undefined): TreeRow | undefined {
+    return this.rows.find((row) => rowKey(row) === value);
+  }
+
+  private selectedRow(): TreeRow | undefined {
+    return this.rowFor(this.list?.getSelectedItem()?.value);
+  }
+
+  /** Enter on a project folds or unfolds it; on a task it opens the thread. */
+  private activate(value: string): void {
+    const row = this.rowFor(value);
+    if (row?.kind === "project") {
+      this.setCollapsed(row.project.id, !row.collapsed, value);
+    } else if (row) {
+      void import("./task.ts").then(({ TaskScreen }) =>
+        this.app.show(new TaskScreen(this.app, row.task)),
+      );
+    }
+  }
+
+  private setCollapsed(projectId: string, collapsed: boolean, select: string): void {
+    if (collapsed) {
+      this.app.collapsedProjects.add(projectId);
+    } else {
+      this.app.collapsedProjects.delete(projectId);
+    }
+    this.reshape(select);
+  }
+
+  /** Right: unfold the selected project. */
+  private expandSelected(): void {
+    const row = this.selectedRow();
+    if (row?.kind === "project" && row.collapsed) {
+      this.setCollapsed(row.project.id, false, rowKey(row));
+    }
+  }
+
+  /** Left: fold the selected project, or the project of the selected task. */
+  private collapseSelected(): void {
+    const row = this.selectedRow();
+    if (row?.kind === "project" && !row.collapsed) {
+      this.setCollapsed(row.project.id, true, rowKey(row));
+    } else if (row?.kind === "task" && !this.query) {
+      this.setCollapsed(row.task.projectId, true, PROJECT_PREFIX + row.task.projectId);
+    }
+  }
+
   private confirmRemove(permanently: boolean): void {
     const selected = this.list?.getSelectedItem();
-    const task = this.app.tasks.find((entry) => entry.id === selected?.value);
-    if (!task || this.confirmOverlay) {
-      return;
-    }
-    const view = new ConfirmPrompt(task.title, permanently);
-    view.onAnswer = (accept) => {
-      this.confirmOverlay?.hide();
-      this.confirmOverlay = null;
-      this.app.tui.requestRender();
-      if (accept) {
-        void this.removeSelected(permanently);
-      }
-    };
-    this.confirmOverlay = this.app.tui.showOverlay(view, { width: "70%", anchor: "center" });
-    this.app.tui.requestRender();
+    this.removal.ask(
+      this.app.tasks.find((entry) => entry.id === selected?.value),
+      permanently,
+    );
   }
 
-  private async removeSelected(permanently: boolean): Promise<void> {
-    const selected = this.list?.getSelectedItem();
-    const task = this.app.tasks.find((entry) => entry.id === selected?.value);
-    if (!task) {
-      return;
-    }
-    try {
-      if (permanently) {
-        await this.app.client.deleteTask(task.id);
-      } else {
-        await this.app.client.setTaskArchived(task.id, true);
-      }
-      await this.app.refresh();
-    } catch (error) {
-      let verb = "archive";
-      if (permanently) {
-        verb = "delete";
-      }
-      this.app.statusNote = `${verb} failed: ${errorMessage(error)}`;
-      this.app.refreshHeader();
-      this.app.tui.requestRender();
-    }
-  }
-
-  private rebuildList(): void {
-    const projectName = new Map(this.app.projects.map((p) => [p.id, p.name]));
-    const tasks = [...this.app.tasks].sort((a, b) => b.updatedAt - a.updatedAt);
-    const items: SelectItem[] = tasks.map((task) => ({
-      value: task.id,
-      label: `${statusGlyph[task.status]} ${task.title || "(untitled task)"}`,
-      description: `${projectName.get(task.projectId) ?? "?"} · ${task.provider} · ${relativeTime(task.updatedAt)} ago`,
-    }));
-    this.list = new SelectList(items, Math.max(5, this.app.tui.terminal.rows - 6), selectListTheme);
-    this.list.onSelect = (item) => {
-      const task = tasks.find((entry) => entry.id === item.value);
-      if (task) {
-        void import("dovo-terminal/tui/screens/task.ts").then(({ TaskScreen }) =>
-          this.app.show(new TaskScreen(this.app, task)),
-        );
-      }
-    };
-    this.list.onCancel = () => this.app.quit();
+  private rebuildList(prefer?: string): void {
+    const previous = prefer ?? this.list?.getSelectedItem()?.value;
+    this.rows = buildRows(this.app.projects, this.app.tasks, {
+      collapsed: this.app.collapsedProjects,
+      query: this.query,
+      notes: this.app.projectNotes,
+    });
+    const items = this.rows.map((row) => toSelectItem(row, this.query !== ""));
+    const list = new SelectList(
+      items,
+      Math.max(5, this.app.tui.terminal.rows - 6),
+      selectListTheme,
+    );
+    list.setSelectedIndex(
+      Math.max(
+        0,
+        items.findIndex((item) => item.value === previous),
+      ),
+    );
+    list.onSelect = (item) => this.activate(item.value);
+    list.onCancel = () => this.app.quit();
+    this.list = list;
   }
 }

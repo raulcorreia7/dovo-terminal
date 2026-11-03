@@ -1,66 +1,30 @@
 {
-  "name": "dovo-terminal",
-  "version": "0.1.0",
-  "description": "Terminal client for Dovo Studio: browse projects, run agent tasks, and answer approvals from the CLI, rendered with pi-tui differential rendering.",
-  "keywords": [
-    "terminal",
-    "tui",
-    "cli",
-    "agent",
-    "dovo"
-  ],
-  "license": "MIT",
-  "author": {
-    "name": "raulcorreia7",
-    "url": "https://github.com/raulcorreia7"
-  },
-  "maintainers": [
-    {
-      "name": "Dovo Studio",
-      "url": "https://github.com/dovocode/dovo-studio"
-    }
-  ],
-  "contributors": [
-    {
-      "name": "Dominic Vonk",
-      "url": "https://github.com/DominicVonk",
-      "description": "Dovo Studio — the runtime, protocol, and name"
-    }
-  ],
+  "name": "dovo-terminal-workspace",
+  "private": true,
   "type": "module",
-  "exports": {
-    "./*": "./src/*"
-  },
-  "bin": {
-    "dovo": "./src/cli.ts"
-  },
-  "files": [
-    "src",
-    "README.md"
-  ],
   "scripts": {
-    "demo": "node src/cli.ts --demo",
+    "audit": "pnpm audit --audit-level high",
+    "coverage": "node --test --experimental-test-coverage --test-coverage-exclude='**/test/**' --test-coverage-lines=85 --test-coverage-branches=70 --test-coverage-functions=80 packages/cli/test/integration.test.ts packages/client/test/dovo-map.test.ts packages/client/test/federated.test.ts packages/tui/test/task-rows.test.ts packages/tui/test/keys.test.ts packages/cli/test/themes.test.ts packages/cli/test/notify.test.ts packages/cli/test/config.test.ts packages/cli/test/prune.test.ts packages/cli/test/tunnel.test.ts packages/cli/test/shell.test.ts packages/cli/test/services.test.ts packages/cli/test/doctor.test.ts packages/cli/test/deep.test.ts packages/cli/test/github.test.ts packages/tui/test/theme.test.ts packages/cli/test/smoke.ts packages/server/test/server.test.ts packages/client/test/ports.test.ts packages/a2a/test/a2a.test.ts packages/a2a/test/hardening.test.ts packages/a2a/test/mapping.test.ts packages/a2a/test/store.test.ts packages/a2a/test/client.test.ts packages/orchestrator/test/plan.test.ts packages/orchestrator/test/dispatch.test.ts packages/orchestrator/test/planner.test.ts packages/orchestrator/test/e2e.test.ts packages/client/test/runtime-contract.ts",
+    "demo": "pnpm --filter dovo-terminal demo",
+    "dovo": "pnpm --filter dovo-terminal start",
     "format": "biome check --write .",
     "format:check": "biome ci .",
+    "knip": "knip",
     "lint": "biome lint .",
-    "serve": "node src/cli.ts serve --demo",
-    "smoke": "node test/smoke.ts",
-    "start": "node src/cli.ts",
-    "test": "node --test test/*.test.ts",
-    "test:runtime": "node test/runtime-contract.ts",
+    "serve": "pnpm --filter dovo-terminal serve",
+    "sherif": "sherif",
+    "smoke": "pnpm --filter dovo-terminal smoke",
+    "test": "pnpm -r test",
+    "test:runtime": "pnpm -r --if-present test:runtime",
     "typecheck": "tsc --noEmit",
-    "verify": "biome ci . && tsc --noEmit && node --test test/*.test.ts && node test/runtime-contract.ts && node test/smoke.ts"
-  },
-  "dependencies": {
-    "@earendil-works/pi-tui": "^1.5.0",
-    "ws": "^8.22.1",
-    "zod": "^4.6.7"
+    "verify": "biome ci . && tsc --noEmit && knip && sherif && pnpm -r test && pnpm -r --if-present test:runtime && pnpm coverage"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.4",
     "@types/node": "^26.6.6",
     "@types/ws": "^8.18.2",
-    "@xterm/headless": "^6.0.0",
+    "knip": "^6.44.1",
+    "sherif": "^1.13.0",
     "typescript": "^7.0.2"
   },
   "packageManager": "pnpm@12.16.1",

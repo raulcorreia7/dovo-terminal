@@ -1,0 +1,18 @@
+{
+  "name": "@dovo-terminal/tui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The terminal UI: screens, transcript items, and theme. Knows only RuntimeClient.",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@dovo-terminal/protocol": "workspace:*",
+    "@earendil-works/pi-tui": "^1.5.0",
+    "zod": "^4.6.7"
+  }
+}

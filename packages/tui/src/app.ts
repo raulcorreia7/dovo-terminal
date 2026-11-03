@@ -1,0 +1,291 @@
+import { asError, assertNever } from "@dovo-terminal/protocol/errors.ts";
+import type { RuntimeClient } from "@dovo-terminal/protocol/runtime-client.ts";
+import type {
+  ConnectionPhase,
+  SyncFrame,
+  TaskEvent,
+  Unsubscribe,
+} from "@dovo-terminal/protocol/sync.ts";
+import type { AgentProvider, Project, TaskSummary } from "@dovo-terminal/protocol/workspace.ts";
+import {
+  Key,
+  matchesKey,
+  type OverlayHandle,
+  ProcessTerminal,
+  Text,
+  TuiAltScreen,
+  VStack,
+} from "@earendil-works/pi-tui";
+import type { AppOptions } from "./app-options.ts";
+import { headerText } from "./header.ts";
+import { HelpView } from "./help.ts";
+import type { KeyOverrides } from "./keys.ts";
+import { LineText } from "./line.ts";
+import { refreshNotes } from "./project-notes.ts";
+import type { Screen } from "./screen.ts";
+import type { ShellPlan } from "./shell-plan.ts";
+import { runInTerminal, withTerminalSuspended } from "./terminal-shell.ts";
+import { ThemeController } from "./theme/controller.ts";
+import { t } from "./theme/index.ts";
+import { AUTO_THEME } from "./theme/picker.ts";
+
+export class App {
+  readonly tui: TuiAltScreen;
+  private screen: Screen | null = null;
+  private header: LineText | null = null;
+  private helpOverlay: OverlayHandle | null = null;
+  private readonly themes: ThemeController;
+  private refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  private unsubscribe: Unsubscribe | null = null;
+  private stopped: boolean = false;
+
+  /** Folded projects in the task list; lives here so it survives screen rebuilds. */
+  readonly collapsedProjects = new Set<string>();
+  /** One line of outside status per project (e.g. its pull request), by project id. */
+  readonly projectNotes = new Map<string, string>();
+  readonly keys: KeyOverrides;
+  private readonly shellFor: AppOptions["shellFor"];
+  private readonly runShell: (plan: ShellPlan) => void;
+  readonly openPort: AppOptions["openPort"];
+  readonly checkMachines: AppOptions["checkMachines"];
+  projects: Project[] = [];
+  tasks: TaskSummary[] = [];
+  providers: AgentProvider[] = [];
+  phase: ConnectionPhase = "offline";
+  statusNote: string = "";
+
+  readonly client: RuntimeClient;
+  private readonly projectNote: AppOptions["projectNote"];
+
+  constructor(client: RuntimeClient, options: AppOptions = {}) {
+    this.client = client;
+    this.projectNote = options.projectNote;
+    this.keys = options.keys ?? {};
+    this.shellFor = options.shellFor;
+    this.openPort = options.openPort;
+    this.checkMachines = options.checkMachines;
+    this.runShell = options.runShell ?? runInTerminal;
+    this.tui = new TuiAltScreen(options.terminal ?? new ProcessTerminal());
+    this.themes = new ThemeController(this.tui, {
+      themes: options.themes ?? {},
+      setting: options.theme ?? AUTO_THEME,
+      onChange: options.onThemeChange,
+      rebuild: () => this.rebuildScreen(),
+      notify: (message) => {
+        this.statusNote = message;
+      },
+    });
+  }
+
+  async start(initial: Screen): Promise<void> {
+    this.unsubscribe = this.client.subscribe((frame) => this.onFrame(frame));
+    this.tui.addInputListener((data) => this.onInput(data));
+
+    let fatal: Error | null = null;
+    try {
+      await this.refresh();
+    } catch (err) {
+      // Unreachable runtime still opens the UI: the header shows it, retry is `r`.
+      fatal = asError(err);
+    }
+    this.show(initial);
+    if (fatal) {
+      this.statusNote = fatal.message;
+    }
+    this.updateHeader();
+    this.client.connect();
+    this.tui.start();
+    void this.themes.followTerminal();
+  }
+
+  /** One frame handler; each branch stays a single dispatch. */
+  private onFrame(frame: SyncFrame): void {
+    switch (frame.type) {
+      case "event":
+        this.routeEvent(frame.event);
+        return;
+      case "sync":
+        this.scheduleRefresh();
+        return;
+      case "connection":
+        this.phase = frame.state;
+        if (frame.state === "online") {
+          this.scheduleRefresh();
+        }
+        this.updateHeader();
+        this.screen?.onConnection?.(frame.state);
+        this.tui.requestRender();
+        return;
+      default:
+        assertNever(frame);
+    }
+  }
+
+  /** Derived from the single connection state; screens must not mirror it. */
+  get online(): boolean {
+    return this.phase === "online";
+  }
+
+  quit(): void {
+    if (this.stopped) {
+      return;
+    }
+    this.stopped = true;
+    clearTimeout(this.refreshTimer);
+    this.unsubscribe?.();
+    void this.client.close();
+    this.tui.stop();
+    process.exit(0);
+  }
+
+  show(screen: Screen): void {
+    this.screen?.destroy?.();
+    this.screen = screen;
+    const { root, focus } = screen.build(this);
+    this.header = new LineText(this.headerText());
+    const layout = new VStack();
+    layout.addChild(this.header, { basis: "auto" });
+    layout.addChild(root, { grow: 1, basis: 0 });
+    this.tui.setLayoutRoot(layout);
+    this.tui.setFocus(focus ?? root);
+    this.tui.requestRender(true);
+  }
+
+  get currentScreenId(): string {
+    return this.screen?.id ?? "";
+  }
+
+  async refresh(): Promise<void> {
+    const [projects, tasks, providers] = await Promise.all([
+      this.client.listProjects(),
+      this.client.listTasks(),
+      this.client.listProviders(),
+    ]);
+    this.projects = projects;
+    this.tasks = tasks;
+    this.providers = providers;
+    this.screen?.onTasksUpdated?.();
+    this.updateHeader();
+    this.tui.requestRender();
+    void this.loadProjectNotes();
+  }
+
+  /** Fetch outside status per project; redraw only when something changed. */
+  private async loadProjectNotes(): Promise<void> {
+    if (
+      this.projectNote &&
+      (await refreshNotes(this.projects, this.projectNote, this.projectNotes))
+    ) {
+      this.screen?.onTasksUpdated?.();
+    }
+  }
+
+  /** Coalesce sync-triggered refreshes so a burst of frames is one round-trip. */
+  scheduleRefresh(): void {
+    if (this.refreshTimer) {
+      return;
+    }
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = undefined;
+      void this.refresh().catch(() => undefined);
+    }, 250);
+  }
+
+  private routeEvent(event: TaskEvent): void {
+    const task = this.tasks.find((entry) => entry.id === event.taskId);
+    if (task && event.type === "status") {
+      task.status = event.status;
+      task.activeRunId = event.activeRunId ?? task.activeRunId;
+    }
+    this.screen?.onEvent?.(event);
+    this.tui.requestRender();
+  }
+
+  private onInput(data: string): { consume?: boolean } | undefined {
+    if (matchesKey(data, Key.ctrl("q"))) {
+      this.quit();
+      return { consume: true };
+    }
+    if (this.themes.pickerOpen) {
+      return undefined; // the picker owns the keyboard until it closes
+    }
+    if (this.helpOverlay) {
+      this.closeHelp();
+      return { consume: true };
+    }
+    if (this.screen?.handleKey?.(data)) {
+      return { consume: true };
+    }
+    return undefined;
+  }
+
+  // --- header ---------------------------------------------------------------
+
+  private updateHeader(): void {
+    this.header?.setText(this.headerText());
+  }
+
+  /** Screens may annotate the header (e.g. load failures) outside a refresh. */
+  refreshHeader(): void {
+    this.updateHeader();
+  }
+
+  /** Hand the terminal to a shell in the project's folder, then take it back. */
+  openShell(project: Project | undefined): void {
+    const plan = project && this.shellFor?.(project);
+    if (plan) {
+      withTerminalSuspended(this.tui, () => this.runShell(plan));
+    } else {
+      this.statusNote = "no shell for this project (a remote machine needs: dovo add … --ssh)";
+      this.updateHeader();
+      this.tui.requestRender();
+    }
+  }
+
+  showThemePicker(): void {
+    this.themes.showPicker();
+  }
+
+  /** Strings carry their colour, so a new theme means building the screen again. */
+  private rebuildScreen(): void {
+    if (this.screen) {
+      this.show(this.screen.recreate());
+    }
+  }
+
+  // --- help overlay ----------------------------------------------------------
+
+  showHelp(): void {
+    if (this.helpOverlay) {
+      return;
+    }
+    const view = new HelpView(this.keys);
+    view.onKey = () => this.closeHelp();
+    this.helpOverlay = this.tui.showOverlay(view, { width: "60%", anchor: "center" });
+    this.tui.requestRender();
+  }
+
+  closeHelp(): void {
+    if (!this.helpOverlay) {
+      return;
+    }
+    this.helpOverlay.hide();
+    this.helpOverlay = null;
+    this.tui.requestRender();
+  }
+
+  private headerText(): string {
+    return headerText({
+      phase: this.phase,
+      projectCount: this.projects.length,
+      taskCount: this.tasks.length,
+      statusNote: this.statusNote,
+      screenId: this.screen?.id ?? "",
+    });
+  }
+}
+
+/** Plain multi-line message block, e.g. empty states and errors. */
+export function note(text: string, color?: string): Text {
+  return new Text(t(text, color), 1, 1);
+}

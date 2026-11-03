@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "workspaces": {
+    "packages/cli": {
+      "entry": ["test/*.test.ts"]
+    },
+    "packages/server": {
+      "entry": ["test/*.test.ts"]
+    },
+    "packages/*": {},
+    "packages/a2a": {
+      "entry": ["test/*.test.ts"]
+    }
+  }
+}

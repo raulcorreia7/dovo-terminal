@@ -22,7 +22,7 @@ project and agent the runtime knows.
 git clone https://github.com/raulcorreia7/dovo-terminal
 cd dovo-terminal
 pnpm install    # deps only; pnpm's version comes from packageManager
-pnpm add -g .   # registers the dovo command globally
+pnpm add -g ./packages/cli   # registers the dovo command globally
 dovo --local    # connect to the Dovo runtime on this machine
 ```
 
@@ -67,19 +67,114 @@ the TUI behaves identically on every route.
 
 ## Keys
 
-| key       | what it does                                             |
-| --------- | -------------------------------------------------------- |
-| `↑` / `↓` | browse the list; typing filters it                       |
-| `/`       | filter box (`esc` clears)                                |
-| `enter`   | open a task / choose an item                             |
-| `esc`     | back / dismiss                                           |
-| `a`       | answer the pending approval or question                  |
-| `n`       | new task: pick a project, then an agent, then write it   |
-| `d` / `D` | archive (reversible) / delete (permanent) — both confirm |
-| `r`       | refresh lists                                            |
-| `ctrl+c`  | stop the running task (or go back)                       |
-| `?`       | key reference                                            |
-| `ctrl+q`  | quit                                                     |
+On the task list. Projects hold their tasks; fold one away and it stays out of the way.
+
+| key       | what it does                                                                         |
+| --------- | ------------------------------------------------------------------------------------ |
+| `↑` / `↓` | move                                                                                 |
+| `enter`   | open a task; on a project, fold or unfold it                                         |
+| `←` / `→` | fold / unfold the project (`←` on a task folds its project)                          |
+| `/`       | search every project (`esc` clears)                                                  |
+| `n`       | new task: project, agent, model (if it has any), then write it                       |
+| `d` / `D` | archive (reversible) / delete (permanent) — both confirm                             |
+| `s`       | open a shell in the project's folder, on the machine it lives on                     |
+| `o`       | open a web service the project is running (forwarded over ssh if remote)             |
+| `m`       | machines: is everything working?                                                     |
+| `t`       | choose a colour theme                                                                |
+| `i`       | invite a device: shows a code, approve or deny who is waiting, revoke paired devices |
+| `r`       | refresh                                                                              |
+| `?`       | key reference                                                                        |
+| `ctrl+q`  | quit                                                                                 |
+
+In a task: `esc` goes back, `a` answers a pending approval, `ctrl+c` stops the run.
+
+## Several machines
+
+`dovo add <name> <url> --token <t> [--ssh user@host]` saves a machine. With
+`--ssh` the terminal keeps an `ssh -L` tunnel to it for you. `dovo --all` opens
+every saved machine as one workspace: project names carry the machine, e.g.
+`website (laptop)`, and a task runs on the machine its project lives on. A machine
+that is down is skipped instead of failing the others.
+
+Machines can also be A2A workers (`--agent`), see below. Step-by-step setup is in
+[docs/runbooks/personal.md](docs/runbooks/personal.md); running things unattended
+is in [docs/runbooks/unattended.md](docs/runbooks/unattended.md).
+
+## Checking and cleaning up
+
+`m` in the terminal, or `dovo doctor` (exit 1 on a failure, for cron), checks each
+machine (add `--deep` to also ask each expected agent a one-line question, which spends model budget): reachable, expected agents present (`"expect": ["codex","opencode"]` in
+the config), tunnel up, A2A card reachable. `dovo prune --older 30d` lists archived
+tasks older than that; add `--yes` to delete them. Deleting is per machine: `--yes` with `--all` is refused, name one with `--profile`.
+
+## GitHub
+
+Set `"github": true` in the config to show each project's pull request and
+checks on its row (`PR #12 ✓`, `✗` failed, `…` running). It runs the `gh` CLI
+in the project's folder, so it needs `gh` signed in and a local checkout. Off by
+default; read-only.
+
+## Other agents (A2A)
+
+`dovo serve --a2a <port>` serves the runtime as an [A2A](https://a2a-protocol.org)
+agent, using the official SDK. The agent card is public; every call that runs work
+needs `Authorization: Bearer <token>` (`dovo a2a-token`, rotate with `--rotate`).
+It listens on loopback only. Task state is kept in a database next to the config,
+so a restart does not lose or duplicate work, and `a2aAllow` in the config limits
+which projects and agents callers may use.
+
+`dovo orchestrate [port] --worker <name>` (or `--planner <profile>`) serves an
+**orchestrator**: send it a goal and it plans steps, runs them on your saved A2A
+workers (`dovo add <name> <url> --agent --token <t>`), and reports one result.
+It never answers an approval for you and does not retry a failed step. Its plan and each step are saved as it goes, so if the orchestrator restarts, sending the same goal again carries on where it stopped.
+
+## Changing keys
+
+List keys can be replaced in the config by action name:
+
+```json
+{ "keys": { "new": "c", "archive": "x" } }
+```
+
+Actions: `new refresh theme invite search help archive delete unfold fold`. The
+help screen (`?`) always shows the keys in effect.
+
+## Teams notifications
+
+Set `teamsWebhook` in `~/.config/dovo-terminal/config.json`, or the
+`DOVO_TEAMS_WEBHOOK` environment variable, to an https Teams webhook URL. It
+posts when a task needs your input and when a run finishes, from `dovo` and
+`dovo serve`. Posting is best effort and never interrupts the app.
+
+## Agents and models
+
+The new-task screen lists every agent profile and every harness the runtime
+reports as available — Codex, Claude, OpenCode, Pi and the rest of the
+runtime's provider list. A harness that offers more than one model asks which
+to use (`default` lets the harness choose); one without a catalog goes straight
+to the prompt. What appears is decided by the runtime, so a harness the runtime
+cannot drive does not show up here.
+
+## Themes
+
+`t` on the task list opens the picker; the choice is saved. `--theme <name>`
+picks one for a single run. The default, `auto`, follows the terminal's
+light/dark scheme.
+
+Presets: Dovo and Dovo Light, Dracula, Nord, Gruvbox (dark, light), Solarized
+(dark, light), Catppuccin (Mocha, Latte), Tokyo Night, One Dark, High Contrast,
+and a colour-blind-safe Okabe-Ito palette. `NO_COLOR` turns colour off.
+
+Your own themes are JSON files in `~/.config/dovo-terminal/themes/`; the file
+name is the theme name. List only what differs from the theme it `extends`
+(default `dovo`):
+
+```json
+{ "extends": "nord", "colors": { "accent": "#ff8800" } }
+```
+
+Roles: `text muted dim accent user ok warn error border code`, each `#rrggbb`.
+A file with a misspelt role or a bad colour is skipped, and the status bar says so.
 
 ## Troubleshooting
 
@@ -102,6 +197,20 @@ confined to one auditable adapter.
 
 - [docs/dovo-api-contract.md](docs/dovo-api-contract.md) — the upstream HTTP/WS contract, audited against dovo-studio.
 - [docs/local-runtime-protocol.md](docs/local-runtime-protocol.md) — what this project's own server exposes and where it differs.
+
+## Layout
+
+A pnpm workspace. Design tokens and the UI's visual rules are in [DESIGN.md](DESIGN.md); the open architecture decision is in [docs/decisions](docs/decisions/0001-transport-and-control-plane.md). Each package lists its dependencies in its own
+`package.json`; an import a package does not declare fails to resolve, so the
+arrows below are enforced, not conventional.
+
+| package             | owns                                                       | depends on       |
+| ------------------- | ---------------------------------------------------------- | ---------------- |
+| `packages/protocol` | wire schemas, sync frames, the `RuntimeClient` interface   | —                |
+| `packages/client`   | adapters: real Dovo runtime, offline demo, server loopback | protocol         |
+| `packages/server`   | the local runtime server for any `RuntimeClient`           | protocol         |
+| `packages/tui`      | screens, transcript items, theme                           | protocol         |
+| `packages/cli`      | the `dovo` command: config, wiring, smoke and integration  | all of the above |
 
 ## Development
 

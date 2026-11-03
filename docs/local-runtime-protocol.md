@@ -1,13 +1,13 @@
 # Local runtime protocol
 
-The local runtime server (`src/server/`) re-exposes any `RuntimeClient` on
+The local runtime server (`packages/server/`) re-exposes any `RuntimeClient` on
 loopback: JSON over HTTP + one WebSocket channel. This is the client's only
 protocol; Dovo's own wire format never reaches the TUI. The real Dovo client
-(`src/client/dovo.ts` and its `dovo-wire/-sync/-view/-read/-map` parts) is
+(`packages/client/src/dovo.ts` and its `dovo-wire/-sync/-view/-read/-map` parts) is
 the single place that knows Dovo's shapes.
 
 Everything on the wire is validated with zod at both ends
-(`src/protocol/workspace.ts`, `src/protocol/sync.ts`). Frames:
+(`packages/protocol/src/workspace.ts`, `packages/protocol/src/sync.ts`). Frames:
 
 | frame                                | meaning                                |
 | ------------------------------------ | -------------------------------------- |
@@ -17,7 +17,7 @@ Everything on the wire is validated with zod at both ends
 
 `TaskEvent` kinds: `item.append`, `item.update`, `status`,
 `history.replaced`. Conversation items and task statuses are defined in
-`src/protocol/workspace.ts`.
+`packages/protocol/src/workspace.ts`.
 
 ## Endpoints
 
@@ -28,8 +28,9 @@ pass-through, 502 unreachable).
 ```text
 GET    /health
 GET    /api/projects | /api/providers | /api/tasks
+GET    /api/models?provider=       [{id, label}] — empty when there is no choice
 GET    /api/tasks/history?taskId=
-POST   /api/tasks                 {projectId, providerId, prompt}
+POST   /api/tasks                 {projectId, providerId, model?, prompt}
 POST   /api/tasks/message         {taskId, text}
 POST   /api/tasks/cancel          {taskId}
 POST   /api/tasks/lifecycle       {taskId, action: archive | restore | delete}

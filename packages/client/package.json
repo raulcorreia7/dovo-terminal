@@ -1,0 +1,19 @@
+{
+  "name": "@dovo-terminal/client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "RuntimeClient adapters: the real Dovo runtime, the offline demo, and the local-server loopback.",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "test:runtime": "node test/runtime-contract.ts"
+  },
+  "dependencies": {
+    "@dovo-terminal/protocol": "workspace:*",
+    "ws": "^8.22.1",
+    "zod": "^4.6.7"
+  }
+}

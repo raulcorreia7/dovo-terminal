@@ -1,0 +1,21 @@
+{
+  "name": "@dovo-terminal/server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The local runtime server: exposes any RuntimeClient over HTTP and /ws/sync.",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@dovo-terminal/protocol": "workspace:*",
+    "ws": "^8.22.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@dovo-terminal/client": "workspace:*"
+  }
+}

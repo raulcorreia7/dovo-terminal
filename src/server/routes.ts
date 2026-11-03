@@ -4,19 +4,20 @@
 // untyped and there is no casting anywhere on this path.
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { type RuntimeClient } from "../client/runtime-client.ts";
+import type { RuntimeClient } from "../client/runtime-client.ts";
+import { DovoError } from "../protocol/errors.ts";
 import { ENDPOINTS } from "../protocol/http.ts";
-import { DovoError, UpstreamError } from "../protocol/errors.ts";
+import { UpstreamError } from "../protocol/upstream-error.ts";
 import { CreateTaskInputSchema } from "../protocol/workspace.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
 const STATUS = {
-  Ok: 200,
-  NoContent: 204,
-  BadRequest: 400,
-  NotFound: 404,
-  BadGateway: 502,
-  InternalError: 500,
+  ok: 200,
+  noContent: 204,
+  badRequest: 400,
+  notFound: 404,
+  badGateway: 502,
+  internalError: 500,
 } as const;
 
 const TaskIdBody = z.object({ taskId: z.string().min(1) });
@@ -43,7 +44,8 @@ const ROUTES: Route[] = [
   {
     method: "POST",
     path: ENDPOINTS.createTask,
-    handle: async (c, request) => c.createTask(CreateTaskInputSchema.parse(await readJson(request))),
+    handle: async (c, request) =>
+      c.createTask(CreateTaskInputSchema.parse(await readJson(request))),
   },
   {
     method: "POST",
@@ -66,8 +68,11 @@ const ROUTES: Route[] = [
     path: ENDPOINTS.lifecycle,
     handle: async (c, request) => {
       const { taskId, action } = LifecycleBody.parse(await readJson(request));
-      if (action === "delete") await c.deleteTask(taskId);
-      else await c.setTaskArchived(taskId, action === "archive");
+      if (action === "delete") {
+        await c.deleteTask(taskId);
+      } else {
+        await c.setTaskArchived(taskId, action === "archive");
+      }
     },
   },
   {
@@ -88,7 +93,9 @@ const ROUTES: Route[] = [
   },
 ];
 
-const byMethodAndPath = new Map(ROUTES.map((route) => [`${route.method} ${route.path}`, route] as const));
+const byMethodAndPath = new Map(
+  ROUTES.map((route) => [`${route.method} ${route.path}`, route] as const),
+);
 
 /** Handles one HTTP request end to end; never throws. */
 export async function handleRequest(
@@ -98,17 +105,17 @@ export async function handleRequest(
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost"); // url parser base; request.url is absolute-form on the wire
   if (request.method === "GET" && url.pathname === ENDPOINTS.health) {
-    sendJson(response, STATUS.Ok, { status: "ok" });
+    sendJson(response, STATUS.ok, { status: "ok" });
     return;
   }
   const route = byMethodAndPath.get(`${request.method} ${url.pathname}`);
   if (!route) {
-    sendJson(response, STATUS.NotFound, { error: `no route: ${request.method} ${url.pathname}` });
+    sendJson(response, STATUS.notFound, { error: `no route: ${request.method} ${url.pathname}` });
     return;
   }
   try {
     const result = await route.handle(client, request, url.searchParams);
-    sendJson(response, result === undefined ? STATUS.NoContent : STATUS.Ok, result);
+    sendJson(response, result === undefined ? STATUS.noContent : STATUS.ok, result);
   } catch (error) {
     sendJson(response, statusFor(error), { error: messageOf(error) });
   }
@@ -117,7 +124,9 @@ export async function handleRequest(
 /** A query-string parameter, validated like any other input. */
 function queryParam(query: URLSearchParams, name: string): string {
   const value = z.string().min(1).safeParse(query.get(name));
-  if (!value.success) throw new DovoError(`missing ?${name}=`);
+  if (!value.success) {
+    throw new DovoError(`missing ?${name}=`);
+  }
   return value.data;
 }
 
@@ -126,7 +135,9 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   let size = 0;
   for await (const chunk of request) {
     size += (chunk as Buffer).byteLength;
-    if (size > MAX_BODY_BYTES) throw new DovoError("request body too large");
+    if (size > MAX_BODY_BYTES) {
+      throw new DovoError("request body too large");
+    }
     chunks.push(chunk as Buffer);
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
@@ -141,10 +152,16 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
  */
 function statusFor(error: unknown): number {
   const upstream = upstreamOf(error);
-  if (upstream) return upstream.status >= STATUS.BadRequest ? upstream.status : STATUS.BadGateway;
-  if (error instanceof DovoError && error.cause instanceof Error && isNetworkFailure(error.cause)) return STATUS.BadGateway;
-  if (error instanceof DovoError || error instanceof SyntaxError || error instanceof z.ZodError) return STATUS.BadRequest;
-  return STATUS.InternalError;
+  if (upstream) {
+    return upstream.status >= STATUS.badRequest ? upstream.status : STATUS.badGateway;
+  }
+  if (error instanceof DovoError && error.cause instanceof Error && isNetworkFailure(error.cause)) {
+    return STATUS.badGateway;
+  }
+  if (error instanceof DovoError || error instanceof SyntaxError || error instanceof z.ZodError) {
+    return STATUS.badRequest;
+  }
+  return STATUS.internalError;
 }
 
 function isNetworkFailure(cause: Error): boolean {
@@ -152,8 +169,12 @@ function isNetworkFailure(cause: Error): boolean {
 }
 
 function upstreamOf(error: unknown): UpstreamError | undefined {
-  if (error instanceof UpstreamError) return error;
-  if (error instanceof DovoError && error.cause instanceof UpstreamError) return error.cause;
+  if (error instanceof UpstreamError) {
+    return error;
+  }
+  if (error instanceof DovoError && error.cause instanceof UpstreamError) {
+    return error.cause;
+  }
   return undefined;
 }
 
@@ -162,12 +183,17 @@ function messageOf(error: unknown): string {
 }
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {
-  if (response.headersSent) return;
-  if (status === STATUS.NoContent) {
-    response.writeHead(STATUS.NoContent).end();
+  if (response.headersSent) {
+    return;
+  }
+  if (status === STATUS.noContent) {
+    response.writeHead(STATUS.noContent).end();
     return;
   }
   const json = JSON.stringify(body);
-  response.writeHead(status, { "content-type": "application/json", "content-length": Buffer.byteLength(json) });
+  response.writeHead(status, {
+    "content-type": "application/json",
+    "content-length": Buffer.byteLength(json),
+  });
   response.end(json);
 }

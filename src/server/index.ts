@@ -4,14 +4,15 @@
 //
 //   client.subscribe(frame) -> SyncHub -> every /ws/sync peer
 //   HTTP request            -> routes.ts -> RuntimeClient method
-import { createServer } from "node:http";
+
 import { once } from "node:events";
+import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { RuntimeClient } from "dovo-terminal/client/runtime-client.ts";
+import { ENDPOINTS } from "dovo-terminal/protocol/http.ts";
+import { handleRequest } from "dovo-terminal/server/routes.ts";
+import { SyncHub } from "dovo-terminal/server/sync-hub.ts";
 import { WebSocketServer } from "ws";
-import { type RuntimeClient } from "../client/runtime-client.ts";
-import { ENDPOINTS } from "../protocol/http.ts";
-import { handleRequest } from "./routes.ts";
-import { SyncHub } from "./sync-hub.ts";
 
 export interface RuntimeServerOptions {
   client: RuntimeClient;

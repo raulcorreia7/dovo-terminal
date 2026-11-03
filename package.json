@@ -9,12 +9,22 @@
     "agent",
     "dovo"
   ],
-  "license": "ISC",
-  "author": "",
+  "license": "MIT",
+  "author": {
+    "name": "raulcorreia7",
+    "url": "https://github.com/raulcorreia7"
+  },
   "maintainers": [
     {
       "name": "Dovo Studio",
       "url": "https://github.com/dovocode/dovo-studio"
+    }
+  ],
+  "contributors": [
+    {
+      "name": "Dominic Vonk",
+      "url": "https://github.com/DominicVonk",
+      "description": "Dovo Studio — the runtime, protocol, and name"
     }
   ],
   "type": "module",

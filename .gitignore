@@ -1,2 +1,26 @@
+# dependencies
 node_modules/
+
+# build output (noEmit today; nothing generated may ever sneak in)
+dist/
+*.tsbuildinfo
+
+# logs
 *.log
+npm-debug.log*
+
+# local runtime data the server may write here
+.dovo/
+dovo-data/
+*.sqlite
+*.sqlite-journal
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# environment overrides
+.env
+.env.*

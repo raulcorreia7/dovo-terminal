@@ -1,25 +1,39 @@
 {
   "name": "dovo-terminal",
   "version": "0.1.0",
-  "description": "Terminal client for Dovo Studio",
+  "description": "Terminal client for Dovo Studio: browse projects, run agent tasks, and answer approvals from the CLI, rendered with pi-tui differential rendering.",
+  "keywords": [
+    "terminal",
+    "tui",
+    "cli",
+    "agent",
+    "dovo"
+  ],
+  "license": "ISC",
+  "author": "",
   "type": "module",
+  "exports": {
+    "./*": "./src/*"
+  },
   "bin": {
     "dovo": "./src/cli.ts"
   },
   "files": [
-    "src"
+    "src",
+    "README.md"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit",
     "demo": "node src/cli.ts --demo",
+    "format": "biome check --write .",
+    "format:check": "biome ci .",
+    "lint": "biome lint .",
     "serve": "node src/cli.ts serve --demo",
-    "test": "node --test test/server.test.ts test/integration.test.ts",
     "smoke": "node test/smoke.ts",
+    "start": "node src/cli.ts",
+    "test": "node --test test/*.test.ts",
     "test:runtime": "node test/runtime-contract.ts",
-    "verify": "tsc --noEmit && node test/smoke.ts && node test/runtime-contract.ts && node --test test/server.test.ts test/integration.test.ts"
-  },
-  "engines": {
-    "node": ">=22.19"
+    "typecheck": "tsc --noEmit",
+    "verify": "biome ci . && tsc --noEmit && node --test test/*.test.ts && node test/runtime-contract.ts && node test/smoke.ts"
   },
   "dependencies": {
     "@earendil-works/pi-tui": "^1.5.0",
@@ -27,12 +41,13 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.6.4",
     "@types/node": "^26.6.6",
     "@types/ws": "^8.18.2",
     "@xterm/headless": "^6.0.0",
     "typescript": "^7.0.2"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC"
+  "engines": {
+    "node": ">=22.19"
+  }
 }

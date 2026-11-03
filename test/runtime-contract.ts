@@ -10,14 +10,25 @@
 // server.test.ts / integration.test.ts; the UI smoke test uses DemoClient.
 import http from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
-import { WebSocketServer } from "ws";
+import { createDovoClient } from "dovo-terminal/client/dovo.ts";
+import {
+  ApprovalBodySchema,
+  CancelTaskBodySchema,
+  CreateTaskBodySchema,
+  MessageBodySchema,
+  type SyncInputFrame,
+  SyncInputFrameSchema,
+} from "dovo-terminal/client/dovo-wire.ts";
+import { errorMessage } from "dovo-terminal/protocol/errors.ts";
+import { guard } from "dovo-terminal/protocol/guard.ts";
+import type { TaskEvent } from "dovo-terminal/protocol/sync.ts";
 import type { WebSocket as ClientSocket } from "ws";
-import { createDovoClient } from "../src/client/dovo.ts";
-import type { TaskEvent } from "../src/protocol/sync.ts";
+import { WebSocketServer } from "ws";
+import { z } from "zod";
 
 const { WebSocket } = await import("ws");
 // the client uses the global WebSocket; back it with the ws polyglot impl
-(globalThis as { WebSocket: unknown }).WebSocket = WebSocket;
+(globalThis as Record<string, unknown>)["WebSocket"] = WebSocket;
 
 const TASK = "task-1";
 const AGENT = "agent-1";
@@ -33,7 +44,15 @@ function snapshot() {
       version: 1,
       repositories: [{ id: REPO, name: "site", path: "/srv/site", branch: "main", kind: "git" }],
       agents: [
-        { id: AGENT, name: "Claude Opus", provider: "claude", model: "claude-opus-4", instructions: "", permission: "ask", endpoint: "" },
+        {
+          id: AGENT,
+          name: "Claude Opus",
+          provider: "claude",
+          model: "claude-opus-4",
+          instructions: "",
+          permission: "ask",
+          endpoint: "",
+        },
       ],
       tasks: [
         {
@@ -55,15 +74,19 @@ function snapshot() {
 }
 
 interface Seen {
-  message?: Record<string, unknown>;
-  create?: Record<string, unknown>;
-  cancel?: Record<string, unknown>;
-  approvals?: Record<string, unknown>;
-  activity?: Record<string, unknown>;
-  ticket?: string;
+  /** raw capture only for the absence-check below; shape lives in dovo-wire */
+  rawMessage?: Record<string, unknown> | undefined;
+  message?: z.infer<typeof MessageBodySchema> | undefined;
+  create?: z.infer<typeof CreateTaskBodySchema> | undefined;
+  cancel?: z.infer<typeof CancelTaskBodySchema> | undefined;
+  approvals?: z.infer<typeof ApprovalBodySchema> | undefined;
+  activity?: Record<string, unknown> | undefined;
+  ticket?: string | undefined;
 }
 const seen: Seen = {};
-const flags = { rejectNextCreate: false };
+const flags: { rejectNextCreate: boolean } = { rejectNextCreate: false };
+
+const JsonBodySchema = z.record(z.string(), z.unknown());
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://x");
@@ -72,15 +95,27 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify(body));
   };
   let raw = "";
-  req.on("data", (chunk) => (raw += chunk));
+  req.on("data", (chunk) => {
+    raw += chunk;
+  });
   req.on("end", () => {
-    const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
-    if (req.method === "GET" && url.pathname === "/api/snapshot") return send(200, snapshot());
+    const decoded = raw ? JSON.parse(raw) : {};
+    const body = guard(JsonBodySchema, decoded);
+    if (req.method === "GET" && url.pathname === "/api/snapshot") {
+      return send(200, snapshot());
+    }
     if (req.method === "POST" && url.pathname === "/api/activity") {
       seen.activity = body;
       return send(200, {
         events: [
-          { id: "ev-1", time: now, kind: "tool", scope: TASK, summary: "search", payload: JSON.stringify({ status: "completed", presentation: { input: "grep login" } }) },
+          {
+            id: "ev-1",
+            time: now,
+            kind: "tool",
+            scope: TASK,
+            summary: "search",
+            payload: JSON.stringify({ status: "completed", presentation: { input: "grep login" } }),
+          },
         ],
       });
     }
@@ -89,11 +124,12 @@ const server = http.createServer((req, res) => {
       return send(200, { ticket: "ticket-1" });
     }
     if (req.method === "POST" && url.pathname === "/api/tasks/message") {
-      seen.message = body;
+      seen.rawMessage = body;
+      seen.message = guard(MessageBodySchema, body);
       return send(200, { ok: true });
     }
     if (req.method === "PATCH" && url.pathname === "/api/workspace") {
-      seen.create = body;
+      seen.create = guard(CreateTaskBodySchema, body);
       if (flags.rejectNextCreate) {
         flags.rejectNextCreate = false;
         return send(200, { revision: 3, outcome: "rejected", reason: "Invalid request data." });
@@ -101,14 +137,14 @@ const server = http.createServer((req, res) => {
       return send(200, { revision: 2, outcome: "applied" });
     }
     if (req.method === "POST" && url.pathname === "/api/tasks/cancel") {
-      seen.cancel = body;
+      seen.cancel = guard(CancelTaskBodySchema, body);
       return send(200, { ok: true });
     }
     if (req.method === "POST" && url.pathname === "/api/approvals") {
-      seen.approvals = body;
+      seen.approvals = guard(ApprovalBodySchema, body);
       return send(200, { ok: true });
     }
-    send(404, { error: "unhandled " + req.method + " " + url.pathname });
+    send(404, { error: `unhandled ${req.method} ${url.pathname}` });
   });
 });
 
@@ -117,7 +153,11 @@ const port = (server.address() as { port: number }).port;
 
 // --- realtime channel: /ws/sync (converging fake) ---------------------------
 const wss = new WebSocketServer({ noServer: true });
-const cursor = { lastSeq: 5, bootstrapped: false, sawResumeWithCursor: false };
+const cursor: { lastSeq: number; bootstrapped: boolean; sawResumeWithCursor: boolean } = {
+  lastSeq: 5,
+  bootstrapped: false,
+  sawResumeWithCursor: false,
+};
 const liveRef: { socket: ClientSocket | null } = { socket: null };
 
 server.on("upgrade", (req, socket, head) => {
@@ -127,32 +167,116 @@ server.on("upgrade", (req, socket, head) => {
     socket.destroy();
     return;
   }
-  wss.handleUpgrade(req, socket, head, (client) => {
-    liveRef.socket = client;
-    client.on("message", (rawData) => {
-      const input = JSON.parse(String(rawData)) as Record<string, unknown>;
-      if (input["type"] === "resume") {
-        if (typeof input["sequence"] === "number") cursor.sawResumeWithCursor = true;
+  wss.handleUpgrade(req, socket, head, (peer) => {
+    liveRef.socket = peer;
+    peer.on("message", (rawData) => {
+      let input: SyncInputFrame;
+      try {
+        const decoded = JSON.parse(String(rawData));
+        input = guard(SyncInputFrameSchema, decoded);
+      } catch {
+        return; // not an input frame we know
+      }
+      if (input.type === "resume") {
+        if (typeof input.sequence === "number") {
+          cursor.sawResumeWithCursor = true;
+        }
         if (!cursor.bootstrapped) {
           cursor.bootstrapped = true;
-          client.send(JSON.stringify({ type: "snapshot", epoch: "e1", sequence: 5, tag: "t", snapshot: snapshot() }));
-          client.send(
+          peer.send(
             JSON.stringify({
-              type: "delta", epoch: "e1", sequence: 6, base: 5, tag: "t",
-              delta: { workspace: { tasks: { changes: [{ id: TASK, messages: { changes: [{ fields: { id: "m-asst", role: "assistant", text: "hi" } }] } }] } } },
+              type: "snapshot",
+              epoch: "e1",
+              sequence: 5,
+              tag: "t",
+              snapshot: snapshot(),
+            }),
+          );
+          peer.send(
+            JSON.stringify({
+              type: "delta",
+              epoch: "e1",
+              sequence: 6,
+              base: 5,
+              tag: "t",
+              delta: {
+                workspace: {
+                  tasks: {
+                    changes: [
+                      {
+                        id: TASK,
+                        messages: {
+                          changes: [{ fields: { id: "m-asst", role: "assistant", text: "hi" } }],
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
             }),
           );
           cursor.lastSeq = 6;
         }
-        client.send(JSON.stringify({ type: "heartbeat", epoch: "e1", sequence: cursor.lastSeq }));
-      } else if (input["type"] === "watch") {
-        client.send(JSON.stringify({ type: "activity", scope: TASK, order: { revision: 1, total: 1 }, events: [ { id: "ev-2", time: now, kind: "tool", scope: TASK, summary: "read", payload: JSON.stringify({ status: "running", presentation: { input: "read x.ts" } }) } ] }));
-        client.send(JSON.stringify({ type: "activity-delta", scope: TASK, delta: { changes: [{ fields: { id: "ev-2", kind: "tool", scope: TASK, summary: "read" }, payload: JSON.stringify({ status: "completed", presentation: { input: "read x.ts" } }) }] } }));
-        cursor.lastSeq += 1;
-        client.send(
+        peer.send(JSON.stringify({ type: "heartbeat", epoch: "e1", sequence: cursor.lastSeq }));
+      } else if (input.type === "watch") {
+        peer.send(
           JSON.stringify({
-            type: "delta", epoch: "e1", sequence: cursor.lastSeq, base: cursor.lastSeq - 1, tag: "t",
-            delta: { state: { approvals: [{ id: "ap-1", taskId: TASK, title: "Apply patch?", detail: "git apply", scopes: { always: true } }] } },
+            type: "activity",
+            scope: TASK,
+            order: { revision: 1, total: 1 },
+            events: [
+              {
+                id: "ev-2",
+                time: now,
+                kind: "tool",
+                scope: TASK,
+                summary: "read",
+                payload: JSON.stringify({
+                  status: "running",
+                  presentation: { input: "read x.ts" },
+                }),
+              },
+            ],
+          }),
+        );
+        peer.send(
+          JSON.stringify({
+            type: "activity-delta",
+            scope: TASK,
+            delta: {
+              changes: [
+                {
+                  fields: { id: "ev-2", kind: "tool", scope: TASK, summary: "read" },
+                  payload: JSON.stringify({
+                    status: "completed",
+                    presentation: { input: "read x.ts" },
+                  }),
+                },
+              ],
+            },
+          }),
+        );
+        cursor.lastSeq += 1;
+        peer.send(
+          JSON.stringify({
+            type: "delta",
+            epoch: "e1",
+            sequence: cursor.lastSeq,
+            base: cursor.lastSeq - 1,
+            tag: "t",
+            delta: {
+              state: {
+                approvals: [
+                  {
+                    id: "ap-1",
+                    taskId: TASK,
+                    title: "Apply patch?",
+                    detail: "git apply",
+                    scopes: { always: true },
+                  },
+                ],
+              },
+            },
           }),
         );
       }
@@ -163,22 +287,35 @@ server.on("upgrade", (req, socket, head) => {
 // --- drive the real client --------------------------------------------------
 const client = createDovoClient({ url: `http://127.0.0.1:${port}`, token: "t".repeat(32) });
 const events: TaskEvent[] = [];
-let connected = false;
+let online = false;
 client.subscribe((frame) => {
-  if (frame.type === "event") events.push(frame.event);
-  else if (frame.type === "connection") connected = frame.connected;
+  if (frame.type === "event") {
+    events.push(frame.event);
+  } else if (frame.type === "connection") {
+    online = frame.state === "online";
+  }
 });
 
 const failures: string[] = [];
+function resultMarker(passed: boolean): string {
+  if (passed) {
+    return "ok  ";
+  }
+  return "FAIL";
+}
 function expect(condition: boolean, label: string): void {
-  process.stdout.write(`${condition ? "ok  " : "FAIL"}  ${label}\n`);
-  if (!condition) failures.push(label);
+  process.stdout.write(`${resultMarker(condition)}  ${label}\n`);
+  if (!condition) {
+    failures.push(label);
+  }
 }
 const wait = (ms: number) => delay(ms) as Promise<void>;
 const waitFor = async (predicate: () => boolean, ms = 4000): Promise<boolean> => {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
-    if (predicate()) return true;
+    if (predicate()) {
+      return true;
+    }
     await wait(20);
   }
   return predicate();
@@ -189,15 +326,27 @@ const [projects, tasks, providers] = await Promise.all([
   client.listTasks(),
   client.listProviders(),
 ]);
-expect(projects[0]?.id === REPO && projects[0]?.name === "site", "projects from workspace.repositories");
-expect(tasks[0]?.id === TASK && tasks[0]?.status === "running" && tasks[0]?.projectId === REPO, "tasks map status + repositoryId");
-expect(providers.some((p) => p.id === AGENT), "providers from workspace.agents");
+expect(
+  projects[0]?.id === REPO && projects[0]?.name === "site",
+  "projects from workspace.repositories",
+);
+expect(
+  tasks[0]?.id === TASK && tasks[0]?.status === "running" && tasks[0]?.projectId === REPO,
+  "tasks map status + repositoryId",
+);
+expect(
+  providers.some((p) => p.id === AGENT),
+  "providers from workspace.agents",
+);
 
 client.connect();
-await waitFor(() => connected);
+await waitFor(() => online);
 
 const history = await client.getTaskHistory(TASK);
-expect(history.items.some((i) => i.kind === "user" && i.text === "login is broken"), "history user message via threads scope");
+expect(
+  history.items.some((i) => i.kind === "user" && i.text === "login is broken"),
+  "history user message via threads scope",
+);
 expect(
   history.items.some((i) => i.kind === "tool" && i.name === "search" && i.detail === "grep login"),
   "tool history unwrapped from {events} envelope, detail from presentation.input",
@@ -205,37 +354,44 @@ expect(
 
 await client.sendMessage(TASK, "please fix");
 expect(
-  seen.message?.["id"] === TASK &&
-    typeof seen.message?.["messageId"] === "string" &&
-    seen.message?.["text"] === "please fix" &&
-    !("turnSettings" in (seen.message ?? {})),
+  seen.message?.id === TASK &&
+    (seen.message?.messageId.length ?? 0) > 0 &&
+    seen.message?.text === "please fix" &&
+    !("turnSettings" in (seen.rawMessage ?? {})),
   "message body = {id, messageId, text}, no turnSettings",
 );
 
 await client.createTask({ projectId: REPO, providerId: AGENT, prompt: "New thing\nmore" });
-const create = seen.create as { collection?: string; create?: Record<string, unknown>; changes?: unknown } | undefined;
 expect(
-  create?.collection === "tasks" &&
-    create?.create?.["status"] === "draft" &&
-    !!create?.create?.["title"] &&
-    typeof create?.changes === "object",
+  seen.create !== undefined &&
+    seen.create.collection === "tasks" &&
+    seen.create.create.status === "draft" &&
+    seen.create.create.title.length > 0 &&
+    seen.create.create.repositoryId === REPO,
   "task creation = workspace PATCH with complete draft metadata",
 );
 
 flags.rejectNextCreate = true;
 let rejection = "";
-await client.createTask({ projectId: REPO, providerId: AGENT, prompt: "x" }).catch((error: unknown) => {
-  rejection = error instanceof Error ? error.message : String(error);
-});
+await client
+  .createTask({ projectId: REPO, providerId: AGENT, prompt: "x" })
+  .catch((error: unknown) => {
+    rejection = errorMessage(error);
+  });
 expect(rejection.includes("rejected"), "HTTP 200 with outcome=rejected surfaces as an error");
 
 await client.stopTask(TASK);
-expect(seen.cancel?.["id"] === TASK && seen.cancel?.["runId"] === RUN, "cancel carries the observed activeRunId");
+expect(
+  seen.cancel?.id === TASK && seen.cancel?.runId === RUN,
+  "cancel carries the observed activeRunId",
+);
 
 // live streaming assistant text (delta applied against the bootstrapped snapshot)
 expect(
   await waitFor(() =>
-    events.some((e) => e.type === "item.append" && e.item.kind === "assistant" && e.item.text === "hi"),
+    events.some(
+      (e) => e.type === "item.append" && e.item.kind === "assistant" && e.item.text === "hi",
+    ),
   ),
   "assistant text from WS delta",
 );
@@ -244,14 +400,20 @@ expect(
 client.focusTask(TASK);
 expect(
   await waitFor(() =>
-    events.some((e) => e.type === "item.append" && e.item.kind === "tool" && e.item.id === "tool:ev-2"),
+    events.some(
+      (e) => e.type === "item.append" && e.item.kind === "tool" && e.item.id === "tool:ev-2",
+    ),
   ),
   "live tool event from WS activity frame",
 );
 expect(
   await waitFor(() =>
     events.some(
-      (e) => e.type === "item.update" && e.item.kind === "tool" && e.item.id === "tool:ev-2" && e.item.state === "ok",
+      (e) =>
+        e.type === "item.update" &&
+        e.item.kind === "tool" &&
+        e.item.id === "tool:ev-2" &&
+        e.item.state === "ok",
     ),
   ),
   "tool resolved by activity-delta payload",
@@ -260,18 +422,29 @@ expect(
 // approval arrives via delta.state.approvals → surfaced as a pending approval
 expect(
   await waitFor(() =>
-    events.some((e) => e.type === "item.append" && e.item.kind === "approval" && e.item.id === "approval:ap-1"),
+    events.some(
+      (e) =>
+        e.type === "item.append" && e.item.kind === "approval" && e.item.id === "approval:ap-1",
+    ),
   ),
   "approval surfaced from delta.state.approvals",
 );
 
 await client.answerItem(TASK, "approval:ap-1", "always");
-expect(seen.approvals?.["id"] === "ap-1" && seen.approvals?.["decision"] === "always", "approval answer uses decision field");
+expect(
+  seen.approvals?.id === "ap-1" && seen.approvals?.decision === "always",
+  "approval answer uses decision field",
+);
 
 // heartbeat ahead of the client's cursor must trigger a cursor-bearing resume
 await wait(150);
-liveRef.socket?.send(JSON.stringify({ type: "heartbeat", epoch: "e1", sequence: cursor.lastSeq + 3 }));
-expect(await waitFor(() => cursor.sawResumeWithCursor), "heartbeat gap triggers resume with cursor");
+liveRef.socket?.send(
+  JSON.stringify({ type: "heartbeat", epoch: "e1", sequence: cursor.lastSeq + 3 }),
+);
+expect(
+  await waitFor(() => cursor.sawResumeWithCursor),
+  "heartbeat gap triggers resume with cursor",
+);
 
 await client.close();
 wss.close();

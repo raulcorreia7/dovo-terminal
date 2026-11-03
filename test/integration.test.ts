@@ -5,12 +5,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { openRuntime, type RuntimeRoute } from "../src/client/connect.ts";
-import { type RuntimeClient } from "../src/client/runtime-client.ts";
-import { createDemoClient } from "../src/client/demo.ts";
-import { startRuntimeServer, type RunningRuntimeServer } from "../src/server/index.ts";
-import type { SyncFrame } from "../src/protocol/sync.ts";
-import { TaskStatusSchema } from "../src/protocol/workspace.ts";
+import { openRuntime, type RuntimeRoute } from "dovo-terminal/client/connect.ts";
+import { createDemoClient } from "dovo-terminal/client/demo.ts";
+import type { RuntimeClient } from "dovo-terminal/client/runtime-client.ts";
+import { guard } from "dovo-terminal/protocol/guard.ts";
+import type { ConnectionPhase, SyncFrame } from "dovo-terminal/protocol/sync.ts";
+import { type Project, TaskStatusSchema } from "dovo-terminal/protocol/workspace.ts";
+import { type RunningRuntimeServer, startRuntimeServer } from "dovo-terminal/server/index.ts";
 
 const ROUTES: Record<string, RuntimeRoute> = {
   local: { via: "local" },
@@ -35,8 +36,9 @@ async function exerciseRuntimeClient(client: RuntimeClient): Promise<void> {
   assert.ok(providers.some((p) => p.id === "codex"));
 
   // create + realtime delivery
+  const projectId = firstProjectId(projects);
   const task = await client.createTask({
-    projectId: projects[0]!.id,
+    projectId,
     providerId: "codex",
     prompt: "integration check\nsecond line ignored",
   });
@@ -55,7 +57,7 @@ async function exerciseRuntimeClient(client: RuntimeClient): Promise<void> {
   // history reflects the conversation
   const history = await client.getTaskHistory(task.id);
   assert.ok(history.items.some((i) => i.kind === "user" && i.text.startsWith("integration check")));
-  TaskStatusSchema.parse(history.status);
+  guard(TaskStatusSchema, history.status);
 
   // stop, then lifecycle, all through the same interface
   await client.stopTask(task.id);
@@ -63,22 +65,36 @@ async function exerciseRuntimeClient(client: RuntimeClient): Promise<void> {
   const afterArchive = await client.listTasks();
   assert.ok(!afterArchive.some((t) => t.id === task.id), "archive hides the task");
   await client.setTaskArchived(task.id, false);
-  assert.ok((await client.listTasks()).some((t) => t.id === task.id), "restore brings it back");
+  assert.ok(
+    (await client.listTasks()).some((t) => t.id === task.id),
+    "restore brings it back",
+  );
   await client.deleteTask(task.id);
   assert.ok(!(await client.listTasks()).some((t) => t.id === task.id), "delete removes it");
 
   // unsubscribe is final
   unsubscribe();
   const countAfter = frames.length;
-  await client.createTask({ projectId: projects[0]!.id, providerId: "codex", prompt: "quiet" });
+  await client.createTask({ projectId, providerId: "codex", prompt: "quiet" });
   await delay(400);
   assert.equal(frames.length, countAfter, "unsubscribed listener stays quiet");
+}
+
+/** Typed projection of the fixture invariant: the list is non-empty. */
+function firstProjectId(projects: Project[]): string {
+  const projectId = projects[0]?.id;
+  if (projectId === undefined) {
+    throw new Error("fixture produced no projects");
+  }
+  return projectId;
 }
 
 async function waitFor(predicate: () => boolean, ms = 4000): Promise<boolean> {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
-    if (predicate()) return true;
+    if (predicate()) {
+      return true;
+    }
     await delay(25);
   }
   return predicate();
@@ -126,13 +142,18 @@ test("openRuntime with via:server reaches a standalone dovo serve", async () => 
 test("connection state flows to subscribers, loopback included", async () => {
   const hosted = await hostedServer();
   const session = await openRuntime(null, { via: "server", url: hosted.url });
-  const states: boolean[] = [];
+  const states: ConnectionPhase[] = [];
   session.client.subscribe((frame) => {
-    if (frame.type === "connection") states.push(frame.connected);
+    if (frame.type === "connection") {
+      states.push(frame.state);
+    }
   });
   session.client.connect();
-  assert.ok(await waitFor(() => states.includes(true)), "connected frame arrives");
+  assert.ok(await waitFor(() => states.includes("online")), "online frame arrives");
   await hosted.close(); // the server going down must be observable downward
-  assert.ok(await waitFor(() => states.includes(false)), "disconnect frame arrives");
+  assert.ok(
+    await waitFor(() => states.includes("reconnecting")),
+    "reconnect attempt is observable",
+  );
   await session.close();
 });

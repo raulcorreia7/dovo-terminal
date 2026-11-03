@@ -3,12 +3,29 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import { createDemoClient } from "dovo-terminal/client/demo.ts";
+import { guard } from "dovo-terminal/protocol/guard.ts";
+import { ENDPOINTS, syncUrl } from "dovo-terminal/protocol/http.ts";
+import { type ConnectionPhase, SyncFrameSchema } from "dovo-terminal/protocol/sync.ts";
+import {
+  ProjectSchema,
+  TaskHistorySchema,
+  TaskSummarySchema,
+} from "dovo-terminal/protocol/workspace.ts";
+import { type RunningRuntimeServer, startRuntimeServer } from "dovo-terminal/server/index.ts";
 import { WebSocket } from "ws";
-import { createDemoClient } from "../src/client/demo.ts";
-import { ENDPOINTS, syncUrl } from "../src/protocol/http.ts";
-import { startRuntimeServer, type RunningRuntimeServer } from "../src/server/index.ts";
-import { SyncFrameSchema } from "../src/protocol/sync.ts";
-import { ProjectSchema, TaskHistorySchema, TaskSummarySchema } from "../src/protocol/workspace.ts";
+
+const ProjectListSchema = ProjectSchema.array();
+const TaskSummaryListSchema = TaskSummarySchema.array();
+
+/** Task list over raw HTTP, shared by the tests that watch membership. */
+const listTaskSummaries = async (serverUrl: string) => {
+  const response = await fetch(`${serverUrl}${ENDPOINTS.tasks}`);
+  const payload = await response.json();
+  return guard(TaskSummaryListSchema, payload);
+};
+
+const UNKNOWN_TASK_ERROR = /unknown task/u;
 
 const opened: RunningRuntimeServer[] = [];
 function track(server: RunningRuntimeServer): RunningRuntimeServer {
@@ -16,7 +33,9 @@ function track(server: RunningRuntimeServer): RunningRuntimeServer {
   return server;
 }
 test.after(async () => {
-  for (const server of opened.splice(0)) await server.close();
+  for (const server of opened.splice(0)) {
+    await server.close();
+  }
 });
 
 async function start(): Promise<RunningRuntimeServer> {
@@ -32,18 +51,16 @@ test("health answers without auth or backend calls", async () => {
 
 test("reads map onto the RuntimeClient interface", async () => {
   const server = await start();
-  const projects = ProjectSchema.array().parse(
-    await fetch(server.url + ENDPOINTS.projects).then((r) => r.json()),
-  );
+  const projectsResponse = await fetch(server.url + ENDPOINTS.projects);
+  const projectsPayload = await projectsResponse.json();
+  const projects = guard(ProjectListSchema, projectsPayload);
   assert.ok(projects.length > 0 && typeof projects[0]?.id === "string");
-  const tasks = TaskSummarySchema.array().parse(
-    await fetch(server.url + ENDPOINTS.tasks).then((r) => r.json()),
-  );
+  const tasks = await listTaskSummaries(server.url);
   const first = tasks[0];
   assert.ok(first);
-  const history = TaskHistorySchema.parse(
-    await fetch(`${server.url}${ENDPOINTS.taskHistory}?taskId=${first.id}`).then((r) => r.json()),
-  );
+  const historyResponse = await fetch(`${server.url}${ENDPOINTS.taskHistory}?taskId=${first.id}`);
+  const historyPayload = await historyResponse.json();
+  const history = guard(TaskHistorySchema, historyPayload);
   assert.ok(history.items.some((item) => item.kind === "user"));
 });
 
@@ -54,14 +71,15 @@ test("create -> message -> history works end to end over the wire", async () => 
     body: JSON.stringify({ projectId: "p-alpha", providerId: "codex", prompt: "hello wire" }),
   });
   assert.equal(created.status, 200);
-  const task = TaskSummarySchema.parse(await created.json());
+  const createdPayload = await created.json();
+  const task = guard(TaskSummarySchema, createdPayload);
   await fetch(server.url + ENDPOINTS.sendMessage, {
     method: "POST",
     body: JSON.stringify({ taskId: task.id, text: "and a follow-up" }),
   });
-  const history = TaskHistorySchema.parse(
-    await fetch(`${server.url}${ENDPOINTS.taskHistory}?taskId=${task.id}`).then((r) => r.json()),
-  );
+  const historyResponse = await fetch(`${server.url}${ENDPOINTS.taskHistory}?taskId=${task.id}`);
+  const historyPayload = await historyResponse.json();
+  const history = guard(TaskHistorySchema, historyPayload);
   const texts = history.items.map((item) => ("text" in item ? item.text : ""));
   assert.ok(texts.some((text) => text.includes("hello wire")));
 });
@@ -71,7 +89,7 @@ test("unknown task ids surface as 400, not 500", async () => {
   const response = await fetch(`${server.url}${ENDPOINTS.taskHistory}?taskId=bogus`);
   assert.equal(response.status, 400);
   const body = (await response.json()) as { error: string };
-  assert.match(body.error, /unknown task/);
+  assert.match(body.error, UNKNOWN_TASK_ERROR);
 });
 
 test("invalid bodies are rejected with 400 before reaching the runtime", async () => {
@@ -85,25 +103,27 @@ test("invalid bodies are rejected with 400 before reaching the runtime", async (
 
 test("unknown paths and methods never reach the runtime", async () => {
   const server = await start();
-  assert.equal((await fetch(server.url + "/api/nope")).status, 404);
+  assert.equal((await fetch(`${server.url}/api/nope`)).status, 404);
   assert.equal((await fetch(server.url + ENDPOINTS.tasks, { method: "DELETE" })).status, 404);
 });
 
 test("lifecycle: archive hides, restore returns, delete removes", async () => {
   const server = await start();
   const list = async () => {
-    const tasks = TaskSummarySchema.array().parse(
-      await fetch(server.url + ENDPOINTS.tasks).then((r) => r.json()),
-    );
+    const tasks = await listTaskSummaries(server.url);
     return tasks.map((x) => x.id);
   };
   const response = await fetch(server.url + ENDPOINTS.createTask, {
     method: "POST",
     body: JSON.stringify({ projectId: "p-alpha", providerId: "codex", prompt: "lifecycle" }),
   });
-  const id = TaskSummarySchema.parse(await response.json()).id;
+  const payload = await response.json();
+  const id = guard(TaskSummarySchema, payload).id;
   const lifecycle = (action: string) =>
-    fetch(server.url + ENDPOINTS.lifecycle, { method: "POST", body: JSON.stringify({ taskId: id, action }) });
+    fetch(server.url + ENDPOINTS.lifecycle, {
+      method: "POST",
+      body: JSON.stringify({ taskId: id, action }),
+    });
 
   assert.equal((await lifecycle("archive")).status, 204);
   assert.ok(!(await list()).includes(id));
@@ -121,7 +141,8 @@ test("/ws/sync streams validated frames to every connected client", async () => 
     new Promise<WebSocket>((resolveSocket, rejectSocket) => {
       const socket = new WebSocket(syncUrl(server.url));
       socket.on("message", (raw: Buffer) => {
-        const frame = SyncFrameSchema.parse(JSON.parse(String(raw))); // a bad frame fails the test
+        const decoded = JSON.parse(String(raw)); // a bad frame fails the test
+        const frame = guard(SyncFrameSchema, decoded);
         target.push(frame);
       });
       socket.on("error", rejectSocket);
@@ -135,31 +156,38 @@ test("/ws/sync streams validated frames to every connected client", async () => 
   });
   await delay(1500); // demo runtime streams tool + assistant items over ~2 s
 
-  const eventFrames = frames1.filter(
-    (frame) => (frame as { type: string }).type === "event",
-  ) as { event: { type: string; item?: { kind?: string } } }[];
-  assert.ok(eventFrames.some((f) => f.event.type === "item.append"), "got item.append");
+  const eventFrames = frames1.filter((frame) => (frame as { type: string }).type === "event") as {
+    event: { type: string; item?: { kind?: string } };
+  }[];
+  assert.ok(
+    eventFrames.some((f) => f.event.type === "item.append"),
+    "got item.append",
+  );
   assert.ok(
     eventFrames.some((f) => f.event.item?.kind === "tool"),
     "got tool activity",
   );
   assert.ok(frames2.length > 0, "second client received frames too");
-  for (const socket of sockets) socket.close();
+  for (const socket of sockets) {
+    socket.close();
+  }
   await delay(50);
 });
 
 test("close() finalizes server, sockets, and the wrapped runtime", async () => {
   const client = createDemoClient();
-  let connectionState: boolean | null = null;
+  let connectionState: ConnectionPhase | null = null;
   let disconnects = 0;
   client.subscribe((frame) => {
     if (frame.type === "connection") {
-      connectionState = frame.connected;
-      if (!frame.connected) disconnects += 1;
+      connectionState = frame.state;
+      if (frame.state === "offline") {
+        disconnects += 1;
+      }
     }
   });
   const server = await startRuntimeServer({ client, port: 0 });
-  assert.equal(connectionState, true, "connect frame arrives at startup");
+  assert.equal(connectionState, "online", "connect frame arrives at startup");
   await server.close(); // must resolve: no keep-alive or ws handle left open
   assert.equal(disconnects, 1, "client saw exactly one disconnect");
 });

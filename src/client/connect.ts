@@ -11,7 +11,7 @@ import { createRuntimeClient } from "dovo-terminal/client/loopback.ts";
 import type { RuntimeClient } from "dovo-terminal/client/runtime-client.ts";
 import { startRuntimeServer } from "dovo-terminal/server/index.ts";
 
-export interface RuntimeSession {
+interface RuntimeSession {
   client: RuntimeClient;
   close(): Promise<void>;
 }

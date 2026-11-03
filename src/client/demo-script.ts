@@ -19,7 +19,7 @@ export const DEMO_PROVIDERS = [
 ];
 
 /** The one pre-seeded conversation the list and history show on start. */
-export const DEMO_SEED_TASK_ID = "t-old";
+const DEMO_SEED_TASK_ID = "t-old";
 export const DEMO_SEED_TASK = {
   id: DEMO_SEED_TASK_ID,
   projectId: "p-alpha",
@@ -53,7 +53,7 @@ export interface ReplyFrame {
   first: boolean;
 }
 
-export interface ReplyPlan {
+interface ReplyPlan {
   toolStart: { delay: number; detail: string };
   toolResolve: { delay: number; detail: string };
   frames: ReplyFrame[];

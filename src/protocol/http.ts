@@ -2,7 +2,6 @@
 // server implementation and every client of it. Deliberately shaped like
 // Dovo's own routes; payloads are this project's validated schemas
 // (protocol/workspace.ts, protocol/sync.ts).
-import { z } from "zod";
 
 export const ENDPOINTS = {
   health: "/health",
@@ -37,7 +36,3 @@ export function lifecycleAction(archived: boolean): "archive" | "restore" {
   }
   return "restore";
 }
-
-/** Error bodies the local server returns: {"error": string}, always. */
-export const ErrorResponseSchema = z.looseObject({ error: z.string() });
-export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;

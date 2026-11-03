@@ -49,7 +49,7 @@ function jsonBody(body: unknown): RequestInit {
   return { headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
 }
 
-export class LoopbackRuntimeClient implements RuntimeClient {
+class LoopbackRuntimeClient implements RuntimeClient {
   private httpUrl: string;
   private reconnect: { baseMs: number; maxMs: number };
   private retryDelay: number;

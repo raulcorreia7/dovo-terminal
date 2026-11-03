@@ -14,7 +14,7 @@ import { handleRequest } from "dovo-terminal/server/routes.ts";
 import { SyncHub } from "dovo-terminal/server/sync-hub.ts";
 import { WebSocketServer } from "ws";
 
-export interface RuntimeServerOptions {
+interface RuntimeServerOptions {
   client: RuntimeClient;
   /** Loopback by default; this server is not a multi-host boundary. */
   hostname?: string;

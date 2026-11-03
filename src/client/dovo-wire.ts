@@ -10,13 +10,12 @@ import { z } from "zod";
 
 const Loose = <T extends z.ZodRawShape>(shape: T) => z.looseObject(shape);
 
-export const WireMessageSchema = Loose({
+const WireMessageSchema = Loose({
   id: z.string(),
   role: z.string(),
   text: z.string(),
   createdAt: z.string().optional(),
 });
-export type WireMessage = z.infer<typeof WireMessageSchema>;
 
 export const WireTaskSchema = Loose({
   id: z.string(),
@@ -72,7 +71,7 @@ export const SnapshotSchema = Loose({
 });
 export type WireSnapshot = z.infer<typeof SnapshotSchema>;
 
-export const AgentAvailabilitySchema = Loose({ id: z.string(), available: z.boolean() });
+const AgentAvailabilitySchema = Loose({ id: z.string(), available: z.boolean() });
 export const AgentAvailabilityListSchema = z.array(AgentAvailabilitySchema);
 
 export const ActivityEventSchema = Loose({
@@ -102,8 +101,8 @@ export const ToolPayloadSchema = Loose({
 export const ActivityEventListSchema = z.array(ActivityEventSchema);
 
 // WS activity-delta frames: field- replacements plus payload text edits.
-export const MessageTextDeltaSchema = Loose({ append: z.string() });
-export const PayloadTextDeltaSchema = Loose({
+const MessageTextDeltaSchema = Loose({ append: z.string() });
+const PayloadTextDeltaSchema = Loose({
   length: z.number(),
   offset: z.number(),
   remove: z.number(),
@@ -148,7 +147,6 @@ export const SyncTaskChangeSchema = Loose({
   }).optional(),
   messages: Loose({ changes: z.array(MessageChangeSchema).optional() }).optional(),
 });
-export type SyncTaskChange = z.infer<typeof SyncTaskChangeSchema>;
 export const SyncDeltaSchema = Loose({
   state: Loose({
     approvals: z.array(WireApprovalSchema).optional(),
@@ -190,13 +188,13 @@ export const ApprovalBodySchema = z.object({
 });
 export type ApprovalBody = z.infer<typeof ApprovalBodySchema>;
 
-export const LifecycleBodySchema = z.object({
+const LifecycleBodySchema = z.object({
   id: z.string(),
   action: z.enum(["archive", "restore", "delete"]),
 });
 export type LifecycleBody = z.infer<typeof LifecycleBodySchema>;
 
-export const AnswerBodySchema = z.object({
+const AnswerBodySchema = z.object({
   id: z.string(),
   answers: z.record(z.string(), z.array(z.string())),
 });
@@ -212,7 +210,6 @@ export const WireHarnessDraftSchema = z.object({
   permission: z.string(),
   endpoint: z.string(),
 });
-export type WireHarnessDraft = z.infer<typeof WireHarnessDraftSchema>;
 
 export const WireTaskDraftSchema = z.object({
   id: z.string(),

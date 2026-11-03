@@ -1,51 +1,48 @@
 import { randomUUID } from "node:crypto";
-import type { RuntimeClient } from "../client/runtime-client.ts";
-import { DovoError } from "../protocol/errors.ts";
-import { TASK_TITLE_MAX_CHARS } from "../protocol/workspace.ts";
-import type { CreateTaskInput } from "../protocol/workspace.ts";
-import { SyncSink, type SyncListener, type TaskEvent, type Unsubscribe } from "../protocol/sync.ts";
+import {
+  DEMO_APPROVAL,
+  DEMO_PROJECTS,
+  DEMO_PROVIDERS,
+  DEMO_SEED_ITEMS,
+  DEMO_SEED_TASK,
+  planReply,
+  type ReplyFrame,
+} from "dovo-terminal/client/demo-script.ts";
+import type { RuntimeClient } from "dovo-terminal/client/runtime-client.ts";
+import { ConnectionStateMachine } from "dovo-terminal/protocol/connection-state.ts";
+import { DovoError } from "dovo-terminal/protocol/errors.ts";
+import type {
+  ConnectionPhase,
+  SyncListener,
+  TaskEvent,
+  Unsubscribe,
+} from "dovo-terminal/protocol/sync.ts";
+import { SyncSink } from "dovo-terminal/protocol/sync-sink.ts";
 import type {
   AgentProvider,
   ConversationItem,
+  CreateTaskInput,
   Project,
   TaskHistory,
   TaskSummary,
-} from "../protocol/workspace.ts";
+} from "dovo-terminal/protocol/workspace.ts";
+import { TASK_TITLE_MAX_CHARS } from "dovo-terminal/protocol/workspace.ts";
 
 const SYNC_HINT_AFTER_CREATE_MS = 50;
 
-// Deterministic fake runtime: streams scripted agent turns with the same event
-// discipline as the real client. Serves `dovo serve --demo`, `dovo --demo`,
-// and the TUI smoke test - the app runs on it alone, no Dovo required.
-// Pacing values are arbitrary; their order is not.
+/** Deterministic fake runtime; the fiction itself lives in demo-script.ts. */
 export class DemoClient implements RuntimeClient {
   private sink = new SyncSink();
 
-  private readonly projects: Project[] = [
-    { id: "p-alpha", name: "website", path: "/srv/website" },
-    { id: "p-beta", name: "infra", path: "/srv/infra" },
-  ];
-  private readonly providers: AgentProvider[] = [
-    { id: "codex", label: "Codex" },
-    { id: "claude", label: "Claude" },
-  ];
+  private readonly projects: Project[] = DEMO_PROJECTS;
+  private readonly providers: AgentProvider[] = DEMO_PROVIDERS;
   private tasks = new Map<string, TaskSummary>();
   private items = new Map<string, ConversationItem[]>();
   private timers: ReturnType<typeof setTimeout>[] = [];
 
   constructor() {
-    this.seedTask(
-      "t-old",
-      "p-alpha",
-      "Fix header overflow on mobile",
-      "idle",
-      "codex",
-      Date.now() - 3_600_000,
-    );
-    this.items.set("t-old", [
-      { kind: "user", id: "i1", text: "The nav wraps on narrow screens" },
-      { kind: "assistant", id: "i2", text: "Fixed by constraining the flex row.\n\n```css\nnav { flex-wrap: nowrap; }\n```", done: true },
-    ]);
+    this.seedTask({ ...DEMO_SEED_TASK, updatedAt: Date.now() - DEMO_SEED_TASK.ageMs });
+    this.items.set(DEMO_SEED_TASK.id, [...DEMO_SEED_ITEMS]);
   }
 
   subscribe(listener: SyncListener): Unsubscribe {
@@ -53,16 +50,20 @@ export class DemoClient implements RuntimeClient {
   }
 
   connect(): void {
-    this.publishConnection(true);
+    this.publishConnection("online");
   }
 
-  focusTask(_taskId: string | null): void {}
+  focusTask(_taskId: string | null): void {
+    // The demo streams the same history regardless of focus.
+    void _taskId;
+  }
 
-  async close(): Promise<void> {
-    this.stopped = true;
-    for (const timer of this.timers) clearTimeout(timer);
+  close(): void {
+    this.publishConnection("offline");
+    for (const timer of this.timers) {
+      clearTimeout(timer);
+    }
     this.timers = [];
-    this.publishConnection(false);
     this.sink.clear();
   }
 
@@ -93,14 +94,14 @@ export class DemoClient implements RuntimeClient {
 
   async createTask(input: CreateTaskInput): Promise<TaskSummary> {
     const id = randomUUID();
-    const task = this.seedTask(
+    const task = this.seedTask({
       id,
-      input.projectId,
-      input.prompt.split("\n")[0]!.slice(0, TASK_TITLE_MAX_CHARS),
-      "running",
-      input.providerId,
-      Date.now(),
-    );
+      projectId: input.projectId,
+      title: (input.prompt.split("\n")[0] ?? "").slice(0, TASK_TITLE_MAX_CHARS),
+      status: "running",
+      provider: input.providerId,
+      updatedAt: Date.now(),
+    });
     task.activeRunId = randomUUID();
     this.append(id, { kind: "user", id: randomUUID(), text: input.prompt });
     this.streamAgentReply(id, input.prompt);
@@ -128,8 +129,11 @@ export class DemoClient implements RuntimeClient {
 
   async setTaskArchived(taskId: string, archived: boolean): Promise<void> {
     this.mustTask(taskId);
-    if (archived) this.archived.add(taskId);
-    else this.archived.delete(taskId);
+    if (archived) {
+      this.archived.add(taskId);
+    } else {
+      this.archived.delete(taskId);
+    }
   }
 
   async deleteTask(taskId: string): Promise<void> {
@@ -142,7 +146,9 @@ export class DemoClient implements RuntimeClient {
   async answerItem(taskId: string, itemId: string, answer: string): Promise<void> {
     const items = this.items.get(taskId) ?? [];
     const item = items.find((entry) => entry.id === itemId);
-    if (!item || item.kind !== "approval") return;
+    if (item?.kind !== "approval") {
+      return;
+    }
     item.answered = answer;
     this.emit({ type: "item.update", taskId, item: { ...item } });
     const task = this.mustTask(taskId);
@@ -153,75 +159,63 @@ export class DemoClient implements RuntimeClient {
 
   // --- scripted behavior ------------------------------------------------------
 
-  private seedTask(
-    id: string,
-    projectId: string,
-    title: string,
-    status: TaskSummary["status"],
-    provider: string,
-    updatedAt: number,
-  ): TaskSummary {
-    const task: TaskSummary = { id, projectId, title, status, provider, updatedAt };
-    this.tasks.set(id, task);
-    this.items.set(id, this.items.get(id) ?? []);
+  private seedTask(task: TaskSummary): TaskSummary {
+    this.tasks.set(task.id, task);
+    this.items.set(task.id, this.items.get(task.id) ?? []);
     return task;
   }
 
   private mustTask(id: string): TaskSummary {
     const task = this.tasks.get(id);
-    if (!task) throw new DovoError(`unknown task ${id}`);
+    if (!task) {
+      throw new DovoError(`unknown task ${id}`);
+    }
     return task;
   }
 
   private streamAgentReply(taskId: string, prompt: string): void {
     const toolId = randomUUID();
     const replyId = randomUUID();
-    const chunks = [
-      "Working on it.\n\n",
-      `Here is what I found about **${prompt.slice(0, 40)}**:\n\n`,
-      "- inspected the project files\n",
-      "- checked recent diffs\n\n",
-      "The change is straightforward; I will apply it once you approve.\n",
-    ];
-    let delay = 300;
-    this.at(delay, () =>
+    const plan = planReply(prompt);
+    this.at(plan.toolStart.delay, () =>
       this.append(taskId, {
         kind: "tool",
         id: toolId,
         name: "search",
-        detail: "pattern: " + prompt.slice(0, 24),
+        detail: plan.toolStart.detail,
         state: "running",
       }),
     );
-    delay += 700;
-    this.at(delay, () => {
-      const item: ConversationItem = { kind: "tool", id: toolId, name: "search", detail: "12 matches", state: "ok" };
-      this.update(taskId, item);
-    });
-    delay += 300;
-    let partial = "";
-    for (const chunk of chunks) {
-      delay += 350;
-      const text = chunk;
-      this.at(delay, () => {
-        partial += text;
-        const item: ConversationItem = { kind: "assistant", id: replyId, text: partial, done: false };
-        if (partial === text) this.append(taskId, item);
-        else this.update(taskId, item);
-      });
+    this.at(plan.toolResolve.delay, () =>
+      this.update(taskId, {
+        kind: "tool",
+        id: toolId,
+        name: "search",
+        detail: plan.toolResolve.detail,
+        state: "ok",
+      }),
+    );
+    for (const frame of plan.frames) {
+      this.streamReplyFrame(taskId, replyId, frame);
     }
-    delay += 400;
+    this.scheduleApprovalTail(taskId, replyId, plan.finalText, plan.approvalDelay);
+  }
+
+  /** End the scripted turn: completed answer, an approval to interact with, waiting status. */
+  private scheduleApprovalTail(
+    taskId: string,
+    replyId: string,
+    fullText: string,
+    delay: number,
+  ): void {
     this.at(delay, () => {
-      this.update(taskId, { kind: "assistant", id: replyId, text: partial, done: true });
+      this.update(taskId, { kind: "assistant", id: replyId, text: fullText, done: true });
       this.append(taskId, {
         kind: "approval",
         id: randomUUID(),
-        title: "Apply change to main?",
-        detail: "git apply --index 1-file patch",
-        options: [
-          { id: "yes", label: "Yes, apply" },
-          { id: "no", label: "No, keep planning" },
-        ],
+        title: DEMO_APPROVAL.title,
+        detail: DEMO_APPROVAL.detail,
+        options: DEMO_APPROVAL.options.map((option) => ({ ...option })),
         answered: null,
       });
       const task = this.mustTask(taskId);
@@ -230,24 +224,46 @@ export class DemoClient implements RuntimeClient {
     });
   }
 
-  private stopped = false;
+  private streamReplyFrame(taskId: string, replyId: string, frame: ReplyFrame): void {
+    this.at(frame.delay, () => {
+      const item: ConversationItem = {
+        kind: "assistant",
+        id: replyId,
+        text: frame.text,
+        done: false,
+      };
+      if (frame.first) {
+        this.append(taskId, item);
+      } else {
+        this.update(taskId, item);
+      }
+    });
+  }
+
+  private connection = new ConnectionStateMachine();
 
   private at(ms: number, fn: () => void): void {
     // A scripted turn must not resurrect activity after close(); its timers,
     // subscriptions, and the event loop must all be finished.
-    if (this.stopped) return;
+    if (this.connection.phase === "offline") {
+      return;
+    }
     this.timers.push(setTimeout(fn, ms));
   }
 
   private append(taskId: string, item: ConversationItem): void {
-    (this.items.get(taskId) ?? this.items.set(taskId, []).get(taskId)!).push(item);
+    const list = this.items.get(taskId) ?? [];
+    this.items.set(taskId, list);
+    list.push(item);
     this.emit({ type: "item.append", taskId, item });
   }
 
   private update(taskId: string, item: ConversationItem): void {
     const items = this.items.get(taskId) ?? [];
     const index = items.findIndex((entry) => entry.id === item.id);
-    if (index >= 0) items[index] = item;
+    if (index >= 0) {
+      items[index] = item;
+    }
     this.emit({ type: "item.update", taskId, item });
   }
 
@@ -255,9 +271,12 @@ export class DemoClient implements RuntimeClient {
     this.sink.publish({ type: "event", event });
   }
 
-  private publishConnection(connected: boolean): void {
-    // After close() the sink is empty; publishing is harmless either way.
-    this.sink.publish({ type: "connection", connected });
+  /** Sole writer of connection state: an illegal transition is never emitted. */
+  private publishConnection(to: ConnectionPhase): void {
+    if (!this.connection.transition(to)) {
+      return;
+    }
+    this.sink.publish({ type: "connection", state: to });
   }
 }
 

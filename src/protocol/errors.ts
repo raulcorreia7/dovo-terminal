@@ -4,20 +4,28 @@
  * via `UpstreamError`, zod issue) so callers can report without re-parsing.
  */
 export class DovoError extends Error {
-  override readonly cause: unknown;
-  constructor(message: string, cause?: unknown) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = "DovoError";
-    this.cause = cause;
   }
 }
 
-/** An upstream answered with a non-2xx status; the local server maps it onward. */
-export class UpstreamError extends Error {
-  readonly status: number;
-  constructor(message: string, status: number) {
-    super(message);
-    this.name = "UpstreamError";
-    this.status = status;
+/** Control-flow guard for exhaustive switches; TS proves it unreachable. */
+export function assertNever(value: never): never {
+  throw new Error(`unreachable: ${JSON.stringify(value)}`);
+}
+
+/** Everything a catch clause can render, safely and with one function. */
+export function errorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
   }
+  return String(error);
+}
+
+export function asError(error: unknown): Error {
+  if (error instanceof Error) {
+    return error;
+  }
+  return new Error(String(error));
 }

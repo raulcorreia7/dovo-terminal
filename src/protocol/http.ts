@@ -2,6 +2,8 @@
 // server implementation and every client of it. Deliberately shaped like
 // Dovo's own routes; payloads are this project's validated schemas
 // (protocol/workspace.ts, protocol/sync.ts).
+import { z } from "zod";
+
 export const ENDPOINTS = {
   health: "/health",
   projects: "/api/projects",
@@ -20,6 +22,22 @@ export const ENDPOINTS = {
 /** WebSocket URL for a runtime server's sync channel. */
 export function syncUrl(httpUrl: string): string {
   const url = new URL(ENDPOINTS.sync, httpUrl);
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  if (url.protocol === "https:") {
+    url.protocol = "wss:";
+  } else {
+    url.protocol = "ws:";
+  }
   return url.toString();
 }
+
+/** The lifecycle verb for an archive/restore toggle; one table, both clients. */
+export function lifecycleAction(archived: boolean): "archive" | "restore" {
+  if (archived) {
+    return "archive";
+  }
+  return "restore";
+}
+
+/** Error bodies the local server returns: {"error": string}, always. */
+export const ErrorResponseSchema = z.looseObject({ error: z.string() });
+export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;

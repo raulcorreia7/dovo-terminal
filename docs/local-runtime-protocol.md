@@ -9,11 +9,11 @@ protocol; Dovo's own wire format never reaches the TUI. The upstream adapter
 Everything on the wire is validated with zod at both ends
 (`src/protocol/workspace.ts`, `src/protocol/sync.ts`). Frames:
 
-| frame                                | meaning                                        |
-| ------------------------------------ | ---------------------------------------------- |
-| `{"type":"event","event":TaskEvent}` | transcript/status change for one task          |
-| `{"type":"connection","connected"}`  | upstream reachability (header dot)             |
-| `{"type":"sync"}`                    | a data delta landed; debounced refresh         |
+| frame                                | meaning                                |
+| ------------------------------------ | -------------------------------------- |
+| `{"type":"event","event":TaskEvent}` | transcript/status change for one task  |
+| `{"type":"connection","connected"}`  | upstream reachability (header dot)     |
+| `{"type":"sync"}`                    | a data delta landed; debounced refresh |
 
 `TaskEvent` kinds: `item.append`, `item.update`, `status`,
 `history.replaced`. Conversation items and task statuses are defined in
@@ -45,20 +45,20 @@ mirrored where it is already good, and simplified where a third-party client
 benefits. The adapter absorbs every difference, so Dovo upstream changes touch
 one file (`dovo-wire.ts` + mapping), never the protocol or the TUI.
 
-| local                       | Dovo counterpart                                   | deviation                                |
-| --------------------------- | -------------------------------------------------- | ---------------------------------------- |
-| `/health`                   | `GET /health`                                      | none                                     |
-| `/ws/sync`                  | `POST /api/sync/ticket` + `WS /ws/sync`            | no ticket/epoch handshake (private API)  |
-| `GET /api/projects`         | `GET /api/snapshot?scope=overview` `.workspace.repositories` | granular read instead of one snapshot |
-| `GET /api/providers`        | snapshot `.workspace.agents` + `POST /api/agents/availability` | adapter merges both           |
-| `GET /api/tasks`            | snapshot `.workspace.tasks`                        | adapter hides `archivedAt` threads       |
-| `GET /api/tasks/history`    | snapshot `?scope=threads` + `POST /api/activity`   | adapter merges messages + tool events    |
-| `POST /api/tasks`           | `PATCH /api/workspace {collection:"tasks",create}` | plain create; adapter builds the mutation |
-| `POST /api/tasks/message`   | `POST /api/tasks/message`                          | same path; body uses `taskId`            |
-| `POST /api/tasks/cancel`    | `POST /api/tasks/cancel {id,runId}`                | adapter resolves `runId` itself          |
-| `POST /api/tasks/lifecycle` | `POST /api/tasks/lifecycle {id,action}`            | same actions; body uses `taskId`         |
-| `POST /api/tasks/answer`    | `POST /api/approvals` or `POST /api/tasks/answer`  | one endpoint; adapter picks by itemId    |
-| `PUT /api/view`             | `{"type":"watch"}` frame on `/ws/sync`             | focus as a resource, not a frame         |
+| local                       | Dovo counterpart                                               | deviation                                 |
+| --------------------------- | -------------------------------------------------------------- | ----------------------------------------- |
+| `/health`                   | `GET /health`                                                  | none                                      |
+| `/ws/sync`                  | `POST /api/sync/ticket` + `WS /ws/sync`                        | no ticket/epoch handshake (private API)   |
+| `GET /api/projects`         | `GET /api/snapshot?scope=overview` `.workspace.repositories`   | granular read instead of one snapshot     |
+| `GET /api/providers`        | snapshot `.workspace.agents` + `POST /api/agents/availability` | adapter merges both                       |
+| `GET /api/tasks`            | snapshot `.workspace.tasks`                                    | adapter hides `archivedAt` threads        |
+| `GET /api/tasks/history`    | snapshot `?scope=threads` + `POST /api/activity`               | adapter merges messages + tool events     |
+| `POST /api/tasks`           | `PATCH /api/workspace {collection:"tasks",create}`             | plain create; adapter builds the mutation |
+| `POST /api/tasks/message`   | `POST /api/tasks/message`                                      | same path; body uses `taskId`             |
+| `POST /api/tasks/cancel`    | `POST /api/tasks/cancel {id,runId}`                            | adapter resolves `runId` itself           |
+| `POST /api/tasks/lifecycle` | `POST /api/tasks/lifecycle {id,action}`                        | same actions; body uses `taskId`          |
+| `POST /api/tasks/answer`    | `POST /api/approvals` or `POST /api/tasks/answer`              | one endpoint; adapter picks by itemId     |
+| `PUT /api/view`             | `{"type":"watch"}` frame on `/ws/sync`                         | focus as a resource, not a frame          |
 
 Deliberate deviations, all inside the private server-client boundary:
 

@@ -75,21 +75,21 @@ Discovery ignores connection files whose recorded pid is dead. All requests carr
 
 ## Keys
 
-| key | action |
-| --- | --- |
-| `↑` `↓`, or type | browse tasks, filter the list |
-| `/` | filter box (`esc` clears it) |
-| `enter` | open a task, choose an option |
-| type + `enter` | send a message to the open task |
-| `a` | answer the pending approval or question |
-| `n` | new task: pick project, agent, write the prompt |
-| `d` | archive the selected task (reversible, restores in Dovo) |
-| `D` | delete the selected task permanently |
-| `r` | refresh lists |
-| `?` | show all shortcuts |
-| `esc` | back, dismiss |
-| `ctrl+c` | stop the running task |
-| `ctrl+q` | quit |
+| key              | action                                                   |
+| ---------------- | -------------------------------------------------------- |
+| `↑` `↓`, or type | browse tasks, filter the list                            |
+| `/`              | filter box (`esc` clears it)                             |
+| `enter`          | open a task, choose an option                            |
+| type + `enter`   | send a message to the open task                          |
+| `a`              | answer the pending approval or question                  |
+| `n`              | new task: pick project, agent, write the prompt          |
+| `d`              | archive the selected task (reversible, restores in Dovo) |
+| `D`              | delete the selected task permanently                     |
+| `r`              | refresh lists                                            |
+| `?`              | show all shortcuts                                       |
+| `esc`            | back, dismiss                                            |
+| `ctrl+c`         | stop the running task                                    |
+| `ctrl+q`         | quit                                                     |
 
 Status marks in the list: `●` running, `●` waiting for your answer, `○` idle, `✗` error. A run that pauses on an approval shows `press a to choose` in the task view.
 
@@ -117,13 +117,13 @@ dovo token <token> [--profile <name>]
 
 ## Troubleshooting
 
-| symptom | fix |
-| --- | --- |
-| header dot red, lists empty | start the runtime, or point elsewhere: `dovo add studio http://host:port` |
-| 401 or permission errors | the token belongs to another runtime; generate a pairing code and run `dovo token ...` |
-| list empty but connected | the runtime has no projects yet; add one in Dovo desktop or web, tasks need a repo and an agent |
-| dev runtime not found | check `ls ~/.dovo-dev`; if `runtime-connection.json` is missing, the server never finished starting |
-| `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` | Node is older than 22.19; install a newer one |
+| symptom                             | fix                                                                                                 |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------- |
+| header dot red, lists empty         | start the runtime, or point elsewhere: `dovo add studio http://host:port`                           |
+| 401 or permission errors            | the token belongs to another runtime; generate a pairing code and run `dovo token ...`              |
+| list empty but connected            | the runtime has no projects yet; add one in Dovo desktop or web, tasks need a repo and an agent     |
+| dev runtime not found               | check `ls ~/.dovo-dev`; if `runtime-connection.json` is missing, the server never finished starting |
+| `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` | Node is older than 22.19; install a newer one                                                       |
 
 ## Architecture
 
@@ -140,8 +140,12 @@ TUI (tui/) ── RuntimeClient ── RemoteRuntime ── HTTP + /ws/sync ─�
 One interface (`RuntimeClient`), validated types (`protocol/`, zod at every
 JSON boundary), and a local server that re-exposes any backend on loopback.
 The TUI cannot tell whether a server hop exists; `openRuntime` decides that,
-and `dovo serve` runs the server alone. Deviations from Dovo's wire format are
-confined to one adapter and documented in
+and `dovo serve` runs the server alone. The real client mirrors Dovo's own
+shape: wire schemas (`client/dovo-wire.ts`), the `/ws/sync` channel
+(`client/dovo-sync.ts`), snapshot scopes (`client/dovo-read.ts`), pure
+snapshot/delta → view mapping (`client/dovo-map.ts`, `client/dovo-view.ts`);
+the demo's scripted fiction is data in `client/demo-script.ts`. Deviations
+from Dovo's wire format are confined to one adapter and documented in
 [docs/local-runtime-protocol.md](docs/local-runtime-protocol.md); the audited
 upstream contract is [docs/dovo-api-contract.md](docs/dovo-api-contract.md).
 

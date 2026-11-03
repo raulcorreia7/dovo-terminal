@@ -1,0 +1,36 @@
+{
+  "name": "dovo-terminal",
+  "version": "0.1.0",
+  "description": "Terminal client for Dovo Studio",
+  "main": "index.js",
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "demo": "node src/cli.ts --demo",
+    "smoke": "node test/smoke.ts",
+    "test:runtime": "node test/runtime-contract.ts",
+    "verify": "tsc --noEmit && node test/smoke.ts && node test/runtime-contract.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bin": {
+    "dovo": "./src/cli.ts"
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "dependencies": {
+    "@earendil-works/pi-tui": "^1.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/ws": "^8.18.2",
+    "@xterm/headless": "^6.0.0",
+    "typescript": "^7.0.2",
+    "ws": "^8.22.1"
+  }
+}

@@ -1,9 +1,9 @@
 import {
   getTerminalColorMode,
-  parseColor,
-  styleText,
   type MarkdownTheme,
+  parseColor,
   type SelectListTheme,
+  styleText,
 } from "@earendil-works/pi-tui";
 
 // Single palette for the whole app. `t()` takes palette VALUES (hex strings);
@@ -22,10 +22,17 @@ export const colors = {
   code: "#c9b98a",
 };
 
-type StyleAttrs = Partial<{ bold: boolean; italic: boolean; underline: boolean; strikethrough: boolean }>;
+type StyleAttrs = Partial<{
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  strikethrough: boolean;
+}>;
 
 export function t(text: string, color?: string, attrs: StyleAttrs = {}): string {
-  if (!color) return text;
+  if (!color) {
+    return text;
+  }
   return styleText(text, { fg: parseColor(color), ...attrs }, getTerminalColorMode());
 }
 

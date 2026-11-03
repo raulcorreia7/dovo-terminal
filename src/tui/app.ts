@@ -1,24 +1,26 @@
 import {
   Key,
   matchesKey,
+  type OverlayHandle,
   ProcessTerminal,
+  type Terminal,
   Text,
   TuiAltScreen,
   VStack,
-  type OverlayHandle,
-  type Terminal,
 } from "@earendil-works/pi-tui";
-import type { RuntimeClient } from "../client/runtime-client.ts";
-import type { SyncFrame, TaskEvent, Unsubscribe } from "../protocol/sync.ts";
+import type { RuntimeClient } from "dovo-terminal/client/runtime-client.ts";
+import { asError, assertNever } from "dovo-terminal/protocol/errors.ts";
 import type {
-  AgentProvider,
-  Project,
-  TaskSummary,
-} from "../protocol/workspace.ts";
-import { HelpView } from "./help.ts";
-import { LineText } from "./line.ts";
-import { colors, t } from "./theme.ts";
-import type { Screen } from "./screen.ts";
+  ConnectionPhase,
+  SyncFrame,
+  TaskEvent,
+  Unsubscribe,
+} from "dovo-terminal/protocol/sync.ts";
+import type { AgentProvider, Project, TaskSummary } from "dovo-terminal/protocol/workspace.ts";
+import { HelpView } from "dovo-terminal/tui/help.ts";
+import { LineText } from "dovo-terminal/tui/line.ts";
+import type { Screen } from "dovo-terminal/tui/screen.ts";
+import { colors, t } from "dovo-terminal/tui/theme.ts";
 
 export class App {
   readonly tui: TuiAltScreen;
@@ -27,13 +29,13 @@ export class App {
   private helpOverlay: OverlayHandle | null = null;
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private unsubscribe: Unsubscribe | null = null;
-  private stopped = false;
+  private stopped: boolean = false;
 
   projects: Project[] = [];
   tasks: TaskSummary[] = [];
   providers: AgentProvider[] = [];
-  connected = false;
-  statusNote = "";
+  phase: ConnectionPhase = "offline";
+  statusNote: string = "";
 
   readonly client: RuntimeClient;
 
@@ -51,10 +53,12 @@ export class App {
       await this.refresh();
     } catch (err) {
       // Unreachable runtime still opens the UI: the header shows it, retry is `r`.
-      fatal = err instanceof Error ? err : new Error(String(err));
+      fatal = asError(err);
     }
     this.show(initial);
-    if (fatal) this.statusNote = fatal.message;
+    if (fatal) {
+      this.statusNote = fatal.message;
+    }
     this.updateHeader();
     this.client.connect();
     this.tui.start();
@@ -70,17 +74,28 @@ export class App {
         this.scheduleRefresh();
         return;
       case "connection":
-        this.connected = frame.connected;
-        if (frame.connected) this.scheduleRefresh();
+        this.phase = frame.state;
+        if (frame.state === "online") {
+          this.scheduleRefresh();
+        }
         this.updateHeader();
-        this.screen?.onConnection?.(frame.connected);
+        this.screen?.onConnection?.(frame.state);
         this.tui.requestRender();
         return;
+      default:
+        assertNever(frame);
     }
   }
 
+  /** Derived from the single connection state; screens must not mirror it. */
+  get online(): boolean {
+    return this.phase === "online";
+  }
+
   quit(): void {
-    if (this.stopped) return;
+    if (this.stopped) {
+      return;
+    }
     this.stopped = true;
     clearTimeout(this.refreshTimer);
     this.unsubscribe?.();
@@ -122,10 +137,12 @@ export class App {
 
   /** Coalesce sync-triggered refreshes so a burst of frames is one round-trip. */
   scheduleRefresh(): void {
-    if (this.refreshTimer) return;
+    if (this.refreshTimer) {
+      return;
+    }
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = undefined;
-      void this.refresh().catch(() => {});
+      void this.refresh().catch(() => undefined);
     }, 250);
   }
 
@@ -148,7 +165,9 @@ export class App {
       this.closeHelp();
       return { consume: true };
     }
-    if (this.screen?.handleKey?.(data)) return { consume: true };
+    if (this.screen?.handleKey?.(data)) {
+      return { consume: true };
+    }
     return undefined;
   }
 
@@ -166,7 +185,9 @@ export class App {
   // --- help overlay ----------------------------------------------------------
 
   showHelp(): void {
-    if (this.helpOverlay) return;
+    if (this.helpOverlay) {
+      return;
+    }
     const view = new HelpView();
     view.onKey = () => this.closeHelp();
     this.helpOverlay = this.tui.showOverlay(view, { width: "60%", anchor: "center" });
@@ -174,28 +195,52 @@ export class App {
   }
 
   closeHelp(): void {
-    if (!this.helpOverlay) return;
+    if (!this.helpOverlay) {
+      return;
+    }
     this.helpOverlay.hide();
     this.helpOverlay = null;
     this.tui.requestRender();
   }
 
   private headerText(): string {
-    const dot = this.connected ? t("●", colors.ok) : t("●", colors.error);
-    const counts = this.projects.length
-      ? `${this.tasks.length} tasks · ${this.projects.length} projects`
-      : "—";
-    const note = this.statusNote ? ` · ${this.statusNote}` : "";
-    const keys =
-      this.screen?.id === "task"
-        ? t(" esc back  ctrl+c stop", colors.dim)
-        : t(" n new  r refresh  ? help  ctrl+q quit", colors.dim);
     return (
       t("dovo", colors.accent, { bold: true }) +
-      ` ${dot}${note}` +
-      t(`  ${counts}`, colors.muted) +
-      keys
+      ` ${this.connectionDot()}${this.statusSuffix()}` +
+      t(`  ${this.countsText()}`, colors.muted) +
+      this.keysHint()
     );
+  }
+
+  private connectionDot(): string {
+    if (this.phase === "online") {
+      return t("●", colors.ok);
+    }
+    if (this.phase === "connecting" || this.phase === "reconnecting") {
+      return t("●", colors.warn);
+    }
+    return t("●", colors.error);
+  }
+
+  private countsText(): string {
+    if (this.projects.length === 0) {
+      return "—";
+    }
+    return `${this.tasks.length} tasks · ${this.projects.length} projects`;
+  }
+
+  private statusSuffix(): string {
+    if (!this.statusNote) {
+      return "";
+    }
+    return ` · ${this.statusNote}`;
+  }
+
+  private keysHint(): string {
+    if (this.screen?.id === "task") {
+      return t(" esc back  ctrl+c stop", colors.dim);
+    }
+    return t(" n new  r refresh  ? help  ctrl+q quit", colors.dim);
   }
 }
 

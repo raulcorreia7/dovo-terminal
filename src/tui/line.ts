@@ -1,4 +1,4 @@
-import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
+import { type Component, truncateToWidth } from "@earendil-works/pi-tui";
 
 /** Single styled line whose text mutates in place; renders one truncated row. */
 export class LineText implements Component {

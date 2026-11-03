@@ -1,8 +1,8 @@
 // What a screen is to the app: build a layout, optionally react. Screens
 // import this contract (and the App handle) - never each other's internals.
 import type { Component, VStack } from "@earendil-works/pi-tui";
-import type { App } from "./app.ts";
-import type { TaskEvent } from "../protocol/sync.ts";
+import type { ConnectionPhase, TaskEvent } from "dovo-terminal/protocol/sync.ts";
+import type { App } from "dovo-terminal/tui/app.ts";
 
 export interface Screen {
   readonly id: string;
@@ -12,6 +12,6 @@ export interface Screen {
   handleKey?(data: string): boolean;
   onEvent?(event: TaskEvent): void;
   onTasksUpdated?(): void;
-  onConnection?(connected: boolean): void;
+  onConnection?(phase: ConnectionPhase): void;
   destroy?(): void;
 }

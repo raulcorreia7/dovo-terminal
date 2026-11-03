@@ -1,5 +1,5 @@
 import { Container, Text } from "@earendil-works/pi-tui";
-import { colors, t } from "./theme.ts";
+import { colors, t } from "dovo-terminal/tui/theme.ts";
 
 const rows: [string, string][] = [
   ["↑/↓", "browse tasks · type to filter"],
@@ -18,7 +18,7 @@ const rows: [string, string][] = [
 
 /** Static shortcut reference; any key closes (App routes input first). */
 export class HelpView extends Container {
-  onKey: () => void = () => {};
+  onKey: () => void = () => undefined;
 
   constructor() {
     super();

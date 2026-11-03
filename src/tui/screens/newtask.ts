@@ -1,18 +1,16 @@
 import {
+  type Component,
   Editor,
   Key,
   matchesKey,
+  type SelectItem,
   SelectList,
   VStack,
-  type Component,
-  type SelectItem,
 } from "@earendil-works/pi-tui";
-import type { App } from "../app.ts";
-import type { Screen } from "../screen.ts";
-import { colors, editorBorder, selectListTheme, t } from "../theme.ts";
-import { LineText } from "../line.ts";
-import { TaskScreen } from "./task.ts";
-import { TaskListScreen } from "./tasklist.ts";
+import type { App } from "dovo-terminal/tui/app.ts";
+import { LineText } from "dovo-terminal/tui/line.ts";
+import type { Screen } from "dovo-terminal/tui/screen.ts";
+import { colors, editorBorder, selectListTheme, t } from "dovo-terminal/tui/theme.ts";
 
 export type NewTaskStep =
   | { kind: "project" }
@@ -53,17 +51,25 @@ export class NewTaskScreen implements Screen {
 
   private back(): void {
     if (this.step.kind === "prompt") {
-      this.app.show(new NewTaskScreen(this.app, { kind: "provider", projectId: this.step.projectId }));
+      this.app.show(
+        new NewTaskScreen(this.app, { kind: "provider", projectId: this.step.projectId }),
+      );
     } else if (this.step.kind === "provider") {
       this.app.show(new NewTaskScreen(this.app, { kind: "project" }));
     } else {
-      this.app.show(new TaskListScreen(this.app));
+      void import("dovo-terminal/tui/screens/tasklist.ts").then(({ TaskListScreen }) =>
+        this.app.show(new TaskListScreen(this.app)),
+      );
     }
   }
 
   private headingText(): string {
-    if (this.step.kind === "project") return t("New task — choose project", colors.accent, { bold: true });
-    if (this.step.kind === "provider") return t("New task — choose agent", colors.accent, { bold: true });
+    if (this.step.kind === "project") {
+      return t("New task — choose project", colors.accent, { bold: true });
+    }
+    if (this.step.kind === "provider") {
+      return t("New task — choose agent", colors.accent, { bold: true });
+    }
     return t("New task — describe the work (enter to start)", colors.accent, { bold: true });
   }
 
@@ -77,7 +83,10 @@ export class NewTaskScreen implements Screen {
       const list = new SelectList(items, this.listHeight(), selectListTheme);
       list.onSelect = (item) =>
         this.app.show(new NewTaskScreen(this.app, { kind: "provider", projectId: item.value }));
-      list.onCancel = () => this.app.show(new TaskListScreen(this.app));
+      list.onCancel = () =>
+        void import("dovo-terminal/tui/screens/tasklist.ts").then(({ TaskListScreen }) =>
+          this.app.show(new TaskListScreen(this.app)),
+        );
       return { body: list, focus: list };
     }
     if (this.step.kind === "provider") {
@@ -105,14 +114,18 @@ export class NewTaskScreen implements Screen {
   }
 
   private async create(projectId: string, providerId: string, prompt: string): Promise<void> {
-    if (!prompt.trim()) return;
+    if (!prompt.trim()) {
+      return;
+    }
     try {
       const task = await this.app.client.createTask({
         projectId,
         providerId,
         prompt: prompt.trim(),
       });
-      this.app.show(new TaskScreen(this.app, task));
+      void import("dovo-terminal/tui/screens/task.ts").then(({ TaskScreen }) =>
+        this.app.show(new TaskScreen(this.app, task)),
+      );
     } catch (error) {
       this.app.statusNote = `create failed: ${String(error)}`;
       this.app.tui.requestRender();

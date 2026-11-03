@@ -1,24 +1,24 @@
 import {
-  Container,
+  type Component,
   Editor,
   Key,
   Loader,
   matchesKey,
+  type OverlayHandle,
   ScrollView,
+  type SelectItem,
   SelectList,
   VStack,
-  type Component,
-  type OverlayHandle,
-  type SelectItem,
 } from "@earendil-works/pi-tui";
-import type { TaskEvent } from "../../protocol/sync.ts";
-import type { ConversationItem, TaskSummary } from "../../protocol/workspace.ts";
-import type { App } from "../app.ts";
-import type { Screen } from "../screen.ts";
-import { LineText } from "../line.ts";
-import { createItemView, ApprovalItem, AssistantItem, SystemItem, ToolItem, UserItem } from "../items.ts";
-import { colors, editorBorder, selectListTheme, t } from "../theme.ts";
-import { TaskListScreen } from "./tasklist.ts";
+import { assertNever } from "dovo-terminal/protocol/errors.ts";
+import type { TaskEvent } from "dovo-terminal/protocol/sync.ts";
+import type { ConversationItem, TaskSummary } from "dovo-terminal/protocol/workspace.ts";
+import type { App } from "dovo-terminal/tui/app.ts";
+import type { ApprovalItem } from "dovo-terminal/tui/items.ts";
+import { LineText } from "dovo-terminal/tui/line.ts";
+import type { Screen } from "dovo-terminal/tui/screen.ts";
+import { colors, editorBorder, selectListTheme, t } from "dovo-terminal/tui/theme.ts";
+import { TranscriptView } from "dovo-terminal/tui/transcript.ts";
 
 const statusText: Record<TaskSummary["status"], string> = {
   running: t("● running", colors.ok),
@@ -36,7 +36,6 @@ export class TaskScreen implements Screen {
   private readonly composer: Editor;
   private readonly loader: Loader;
   private taskStatus: TaskSummary["status"];
-  private running = false;
   private approvalOverlay: OverlayHandle | null = null;
 
   private readonly app: App;
@@ -47,7 +46,11 @@ export class TaskScreen implements Screen {
     this.task = task;
     this.taskStatus = task.status;
     this.titleBar = new LineText(this.titleText());
-    this.scroll = new ScrollView(this.transcript, { follow: "end", primary: true, scrollbar: "auto" });
+    this.scroll = new ScrollView(this.transcript, {
+      follow: "end",
+      primary: true,
+      scrollbar: "auto",
+    });
     this.composer = new Editor(this.app.tui, {
       borderColor: editorBorder,
       selectList: selectListTheme,
@@ -59,14 +62,14 @@ export class TaskScreen implements Screen {
       (s) => t(s, colors.muted),
       "agent is working",
     );
-    this.setRunningUi(task.status === "running");
+    this.setStatus(task.status);
   }
 
   build(): { root: VStack; focus?: Component } {
     const root = new VStack();
     root.addChild(this.titleBar, { basis: "auto" });
     root.addChild(this.scroll, { grow: 1, basis: 0 });
-    root.addChild(this.loader, { basis: "auto", visible: () => this.running });
+    root.addChild(this.loader, { basis: "auto", visible: () => this.taskStatus === "running" });
     root.addChild(this.composer, { basis: "auto" });
     void this.loadHistory();
     this.app.client.focusTask(this.task.id);
@@ -82,7 +85,9 @@ export class TaskScreen implements Screen {
   async loadHistory(): Promise<void> {
     try {
       const history = await this.app.client.getTaskHistory(this.task.id);
-      if (this.app.currentScreenId !== this.id) return;
+      if (this.app.currentScreenId !== this.id) {
+        return;
+      }
       this.transcript.replaceAll(history.items);
       this.setStatus(history.status);
       this.app.tui.requestRender();
@@ -94,7 +99,9 @@ export class TaskScreen implements Screen {
   }
 
   onEvent(event: TaskEvent): void {
-    if (event.taskId !== this.task.id) return;
+    if (event.taskId !== this.task.id) {
+      return;
+    }
     switch (event.type) {
       case "item.append":
         this.transcript.append(event.item);
@@ -111,6 +118,8 @@ export class TaskScreen implements Screen {
       case "history.replaced":
         this.transcript.replaceAll(event.items);
         break;
+      default:
+        assertNever(event);
     }
     this.app.tui.requestRender();
   }
@@ -121,7 +130,9 @@ export class TaskScreen implements Screen {
         this.approvalOverlay?.hide();
         return true;
       }
-      this.app.show(new TaskListScreen(this.app));
+      void import("dovo-terminal/tui/screens/tasklist.ts").then(({ TaskListScreen }) =>
+        this.app.show(new TaskListScreen(this.app)),
+      );
       return true;
     }
     if (matchesKey(data, Key.ctrl("c"))) {
@@ -130,7 +141,9 @@ export class TaskScreen implements Screen {
           this.app.statusNote = `stop failed: ${String(error)}`;
         });
       } else {
-        this.app.show(new TaskListScreen(this.app));
+        void import("dovo-terminal/tui/screens/tasklist.ts").then(({ TaskListScreen }) =>
+          this.app.show(new TaskListScreen(this.app)),
+        );
       }
       return true;
     }
@@ -146,7 +159,9 @@ export class TaskScreen implements Screen {
 
   private async send(text: string): Promise<void> {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      return;
+    }
     this.composer.setText("");
     try {
       await this.app.client.sendMessage(this.task.id, trimmed);
@@ -159,27 +174,25 @@ export class TaskScreen implements Screen {
   private setStatus(status: TaskSummary["status"]): void {
     this.taskStatus = status;
     this.titleBar.setText(this.titleText());
-    this.setRunningUi(status === "running");
-  }
-
-  private setRunningUi(running: boolean): void {
-    this.running = running;
-    if (running) this.loader.start();
-    else this.loader.stop();
+    if (status === "running") {
+      this.loader.start();
+    } else {
+      this.loader.stop();
+    }
   }
 
   private titleText(): string {
     const project = this.app.projects.find((entry) => entry.id === this.task.projectId);
     return (
       t(` ${this.task.title || "(untitled)"} `, colors.text, { bold: true }) +
-      t(` ${project?.name ?? "?"} · ${this.task.provider} · ${statusText[this.taskStatus]}`, colors.muted)
+      t(
+        ` ${project?.name ?? "?"} · ${this.task.provider} · ${statusText[this.taskStatus]}`,
+        colors.muted,
+      )
     );
   }
 
-  private openApproval(
-    item: ConversationItem & { kind: "approval" },
-    view: ApprovalItem,
-  ): void {
+  private openApproval(item: ConversationItem & { kind: "approval" }, view: ApprovalItem): void {
     const options = item.options;
     if (options.length === 0) {
       this.openFreeformApproval(item, view);
@@ -193,11 +206,9 @@ export class TaskScreen implements Screen {
     list.onSelect = (selected) => {
       this.approvalOverlay?.hide();
       view.resolve(options.find((option) => option.id === selected.value)?.label ?? selected.value);
-      void this.app.client
-        .answerItem(this.task.id, item.id, selected.value)
-        .catch((error) => {
-          this.app.statusNote = `answer failed: ${String(error)}`;
-        });
+      void this.app.client.answerItem(this.task.id, item.id, selected.value).catch((error) => {
+        this.app.statusNote = `answer failed: ${String(error)}`;
+      });
     };
     list.onCancel = () => this.approvalOverlay?.hide();
     // The overlay root must be the interactive component: focus is given to the
@@ -213,73 +224,18 @@ export class TaskScreen implements Screen {
     item: ConversationItem & { kind: "approval" },
     view: ApprovalItem,
   ): void {
-    const editor = new Editor(this.app.tui, { borderColor: editorBorder, selectList: selectListTheme });
+    const editor = new Editor(this.app.tui, {
+      borderColor: editorBorder,
+      selectList: selectListTheme,
+    });
     editor.onSubmit = (text) => {
       this.approvalOverlay?.hide();
       view.resolve(text);
-      void this.app.client
-        .answerItem(this.task.id, item.id, text)
-        .catch((error) => {
-          this.app.statusNote = `answer failed: ${String(error)}`;
-        });
+      void this.app.client.answerItem(this.task.id, item.id, text).catch((error) => {
+        this.app.statusNote = `answer failed: ${String(error)}`;
+      });
     };
     this.approvalOverlay = this.app.tui.showOverlay(editor, { width: "60%", anchor: "center" });
     this.app.tui.requestRender();
-  }
-}
-
-/** Transcript container keyed by item id; updates never rewrite history. */
-class TranscriptView extends Container {
-  private readonly entries = new Map<string, { item: ConversationItem; view: Component }>();
-
-  replaceAll(items: ConversationItem[]): void {
-    this.clear();
-    this.entries.clear();
-    for (const item of items) this.append(item);
-  }
-
-  append(item: ConversationItem): void {
-    if (this.entries.has(item.id)) return this.update(item);
-    const view = createItemView(item);
-    this.entries.set(item.id, { item, view });
-    this.addChild(view);
-  }
-
-  update(item: ConversationItem): void {
-    const entry = this.entries.get(item.id);
-    if (!entry) return this.append(item);
-    entry.item = item;
-    switch (item.kind) {
-      case "user":
-        if (entry.view instanceof UserItem) entry.view.setText(item.text);
-        break;
-      case "assistant":
-        if (entry.view instanceof AssistantItem) entry.view.setText(item.text);
-        break;
-      case "tool":
-        if (entry.view instanceof ToolItem) entry.view.setUpdate(item.name, item.detail, item.state);
-        break;
-      case "approval":
-        if (entry.view instanceof ApprovalItem && item.answered)
-          entry.view.resolve(item.answered);
-        break;
-      case "system":
-        if (entry.view instanceof SystemItem) entry.view.setText(item.text);
-        break;
-    }
-    entry.view.invalidate();
-  }
-
-  viewFor(id: string): Component | undefined {
-    return this.entries.get(id)?.view;
-  }
-
-  pendingApproval(): { item: ConversationItem & { kind: "approval" }; view: ApprovalItem } | null {
-    for (const entry of this.entries.values()) {
-      if (entry.item.kind === "approval" && !entry.item.answered) {
-        return { item: entry.item, view: entry.view as ApprovalItem };
-      }
-    }
-    return null;
   }
 }

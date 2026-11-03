@@ -11,5 +11,5 @@ import type { z } from "zod";
  * behavior rather than a hidden fallback.
  */
 export function guard<S extends z.ZodType>(schema: S, input: unknown): z.infer<S> {
-    return schema.parse(input);
+  return schema.parse(input);
 }

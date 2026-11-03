@@ -166,31 +166,31 @@ are creation-time fields on the same body.
 
 ```json
 {
-    "collection": "tasks",
+  "collection": "tasks",
+  "id": "<your-id>",
+  "changes": {},
+  "create": {
     "id": "<your-id>",
-    "changes": {},
-    "create": {
-        "id": "<your-id>",
-        "repositoryId": "<repoId>",
-        "title": "New task",
-        "agentId": "",
-        "harness": {
-            "provider": "codex",
-            "model": "",
-            "reasoning": "",
-            "serviceTier": "",
-            "instructions": "",
-            "permission": "ask",
-            "endpoint": ""
-        },
-        "execution": "main",
-        "status": "draft",
-        "createdAt": "<ISO>",
-        "messages": [],
-        "files": [],
-        "draft": "",
-        "example": false
-    }
+    "repositoryId": "<repoId>",
+    "title": "New task",
+    "agentId": "",
+    "harness": {
+      "provider": "codex",
+      "model": "",
+      "reasoning": "",
+      "serviceTier": "",
+      "instructions": "",
+      "permission": "ask",
+      "endpoint": ""
+    },
+    "execution": "main",
+    "status": "draft",
+    "createdAt": "<ISO>",
+    "messages": [],
+    "files": [],
+    "draft": "",
+    "example": false
+  }
 }
 ```
 

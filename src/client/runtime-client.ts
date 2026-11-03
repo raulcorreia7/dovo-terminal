@@ -11,33 +11,33 @@
 // timers, subscriptions; close() resolves when nothing is left running.
 import type { SyncListener, Unsubscribe } from "dovo-terminal/protocol/sync.ts";
 import type {
-    AgentProvider,
-    CreateTaskInput,
-    Project,
-    TaskHistory,
-    TaskSummary,
+  AgentProvider,
+  CreateTaskInput,
+  Project,
+  TaskHistory,
+  TaskSummary,
 } from "dovo-terminal/protocol/workspace.ts";
 
 export interface RuntimeClient {
-    /** Realtime frames (task events, connection state, sync hints). */
-    subscribe(listener: SyncListener): Unsubscribe;
-    /** Open the realtime channel; safe to call once after construction. */
-    connect(): void;
-    close(): void;
-    /** Retarget full thread detail + activity to one task (null = none). */
-    focusTask(taskId: string | null): void;
+  /** Realtime frames (task events, connection state, sync hints). */
+  subscribe(listener: SyncListener): Unsubscribe;
+  /** Open the realtime channel; safe to call once after construction. */
+  connect(): void;
+  close(): void;
+  /** Retarget full thread detail + activity to one task (null = none). */
+  focusTask(taskId: string | null): void;
 
-    listProjects(): Promise<Project[]>;
-    listTasks(): Promise<TaskSummary[]>;
-    listProviders(): Promise<AgentProvider[]>;
-    getTaskHistory(taskId: string): Promise<TaskHistory>;
-    createTask(input: CreateTaskInput): Promise<TaskSummary>;
-    sendMessage(taskId: string, text: string): Promise<void>;
-    stopTask(taskId: string): Promise<void>;
-    /** Archive hides the task (reversible); restore brings it back. */
-    setTaskArchived(taskId: string, archived: boolean): Promise<void>;
-    /** Permanently removes the task and its history. */
-    deleteTask(taskId: string): Promise<void>;
-    /** Resolve an approval/question item with an option id or free text. */
-    answerItem(taskId: string, itemId: string, answer: string): Promise<void>;
+  listProjects(): Promise<Project[]>;
+  listTasks(): Promise<TaskSummary[]>;
+  listProviders(): Promise<AgentProvider[]>;
+  getTaskHistory(taskId: string): Promise<TaskHistory>;
+  createTask(input: CreateTaskInput): Promise<TaskSummary>;
+  sendMessage(taskId: string, text: string): Promise<void>;
+  stopTask(taskId: string): Promise<void>;
+  /** Archive hides the task (reversible); restore brings it back. */
+  setTaskArchived(taskId: string, archived: boolean): Promise<void>;
+  /** Permanently removes the task and its history. */
+  deleteTask(taskId: string): Promise<void>;
+  /** Resolve an approval/question item with an option id or free text. */
+  answerItem(taskId: string, itemId: string, answer: string): Promise<void>;
 }

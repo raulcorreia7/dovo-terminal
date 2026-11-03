@@ -4,20 +4,20 @@ import type { SyncFrame, SyncListener, Unsubscribe } from "dovo-terminal/protoco
 
 /** Minimal typed fan-out used by every RuntimeClient and the local server. */
 export class SyncSink {
-    private listeners = new Set<SyncListener>();
+  private listeners = new Set<SyncListener>();
 
-    subscribe(listener: SyncListener): Unsubscribe {
-        this.listeners.add(listener);
-        return () => this.listeners.delete(listener);
-    }
+  subscribe(listener: SyncListener): Unsubscribe {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
 
-    publish(frame: SyncFrame): void {
-        for (const listener of this.listeners) {
-            listener(frame);
-        }
+  publish(frame: SyncFrame): void {
+    for (const listener of this.listeners) {
+      listener(frame);
     }
+  }
 
-    clear(): void {
-        this.listeners.clear();
-    }
+  clear(): void {
+    this.listeners.clear();
+  }
 }

@@ -1,37 +1,37 @@
 {
-    "$schema": "https://json.schemastore.org/tsconfig",
-    "compilerOptions": {
-        // language: newest stable target; Node runs the sources directly
-        "target": "es2024",
-        "lib": ["es2024"],
-        "module": "nodenext",
-        "moduleResolution": "nodenext",
-        "types": ["node"],
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    // language: newest stable target; Node runs the sources directly
+    "target": "es2024",
+    "lib": ["es2024"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
 
-        // strictness: everything TypeScript offers that catches real bugs
-        "strict": true,
-        "exactOptionalPropertyTypes": true,
-        "noUncheckedIndexedAccess": true,
-        "noImplicitOverride": true,
-        "noImplicitReturns": true,
-        "noPropertyAccessFromIndexSignature": true,
-        "noFallthroughCasesInSwitch": true,
-        "allowUnreachableCode": false,
-        "allowUnusedLabels": false,
-        "noUnusedLocals": true,
-        "noUnusedParameters": true,
+    // strictness: everything TypeScript offers that catches real bugs
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noFallthroughCasesInSwitch": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
 
-        // module hygiene: importable by Node's type stripping, no emit ever
-        "verbatimModuleSyntax": true,
-        "isolatedModules": true,
-        "erasableSyntaxOnly": true,
-        "allowImportingTsExtensions": true,
-        "noEmit": true,
-        "useDefineForClassFields": true,
-        "noUncheckedSideEffectImports": true,
-        "forceConsistentCasingInFileNames": true,
+    // module hygiene: importable by Node's type stripping, no emit ever
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "erasableSyntaxOnly": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "useDefineForClassFields": true,
+    "noUncheckedSideEffectImports": true,
+    "forceConsistentCasingInFileNames": true,
 
-        "skipLibCheck": true
-    },
-    "include": ["src", "test"]
+    "skipLibCheck": true
+  },
+  "include": ["src", "test"]
 }

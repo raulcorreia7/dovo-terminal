@@ -134,7 +134,7 @@ TUI (tui/) ── RuntimeClient ── RemoteRuntime ── HTTP + /ws/sync ─�
                                                                   │
                                                     RuntimeClient again, backed by:
                                                     DovoRuntime ── real Dovo Studio
-                                                    DemoRuntime ── scripted (demo/)
+                                                    DemoRuntime ── scripted (client/demo.ts)
 ```
 
 One interface (`RuntimeClient`), validated types (`protocol/`, zod at every

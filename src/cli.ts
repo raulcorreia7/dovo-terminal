@@ -5,10 +5,10 @@
 import { once } from "node:events";
 import { parseArgs } from "node:util";
 import { openRuntime } from "./client/connect.ts";
-import { createDovoClient } from "./client/dovo-client.ts";
+import { createDovoClient } from "./client/dovo.ts";
 import { type RuntimeClient } from "./client/runtime-client.ts";
 import { DEFAULT_PRODUCTION_ORIGIN, loadConfig, resolveRuntime, saveConfig } from "./config.ts";
-import { createDemoClient } from "./demo/runtime.ts";
+import { createDemoClient } from "./client/demo.ts";
 import { startRuntimeServer } from "./server/index.ts";
 import { App } from "./tui/app.ts";
 import { TaskListScreen } from "./tui/screens/tasklist.ts";

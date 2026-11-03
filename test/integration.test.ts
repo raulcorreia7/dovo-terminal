@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { openRuntime, type RuntimeRoute } from "../src/client/connect.ts";
 import { type RuntimeClient } from "../src/client/runtime-client.ts";
-import { createDemoClient } from "../src/demo/runtime.ts";
+import { createDemoClient } from "../src/client/demo.ts";
 import { startRuntimeServer, type RunningRuntimeServer } from "../src/server/index.ts";
 import type { SyncFrame } from "../src/protocol/sync.ts";
 import { TaskStatusSchema } from "../src/protocol/workspace.ts";

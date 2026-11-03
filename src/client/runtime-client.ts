@@ -2,8 +2,8 @@
 // The TUI and the local runtime server both depend only on this interface.
 //
 // Implementations (each owns its transport, policy, and wire mapping):
-//   createDovoClient    real Dovo Studio runtime        (client/dovo-client.ts)
-//   createDemoClient    scripted in-memory runtime      (demo/runtime.ts)
+//   createDovoClient    real Dovo Studio runtime        (client/dovo.ts)
+//   createDemoClient    scripted in-memory runtime      (client/demo.ts)
 //   createRuntimeClient local runtime server, over HTTP + /ws/sync (client/loopback.ts)
 //
 // Every method rejects with DovoError. Realtime data arrives via subscribe,

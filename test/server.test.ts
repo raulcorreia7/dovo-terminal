@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { WebSocket } from "ws";
-import { createDemoClient } from "../src/demo/runtime.ts";
+import { createDemoClient } from "../src/client/demo.ts";
 import { ENDPOINTS, syncUrl } from "../src/protocol/http.ts";
 import { startRuntimeServer, type RunningRuntimeServer } from "../src/server/index.ts";
 import { SyncFrameSchema } from "../src/protocol/sync.ts";

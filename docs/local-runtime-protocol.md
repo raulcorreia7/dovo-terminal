@@ -3,7 +3,7 @@
 The local runtime server (`src/server/`) re-exposes any `RuntimeClient` on
 loopback: JSON over HTTP + one WebSocket channel. This is the client's only
 protocol; Dovo's own wire format never reaches the TUI. The upstream adapter
-(`src/client/dovo-client.ts`) is the single place that knows Dovo's shapes
+(`src/client/dovo.ts`) is the single place that knows Dovo's shapes
 (`src/client/dovo-wire.ts`).
 
 Everything on the wire is validated with zod at both ends

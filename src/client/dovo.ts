@@ -13,6 +13,7 @@ import { SyncSink, type SyncListener, type TaskEvent, type Unsubscribe } from ".
 import type { RuntimeConfig } from "../config.ts";
 import {
   ActivityDeltaSchema,
+  SyncDeltaSchema,
   ActivityEventListSchema,
   ActivityPageSchema,
   AgentAvailabilityListSchema,
@@ -21,6 +22,7 @@ import {
   SyncTicketSchema,
   ToolPayloadSchema,
   type ActivityDelta,
+  type SyncDelta,
   type ActivityEvent,
   type WireApproval,
   type WireMessage,
@@ -535,7 +537,8 @@ class DovoRuntime implements RuntimeClient {
       case "selection": {
         this.epoch = String(frame.epoch ?? "");
         this.sequence = Number(frame.sequence ?? 0);
-        this.applyDelta(frame.delta as Record<string, unknown>, true);
+        const selection = SyncDeltaSchema.safeParse(frame.delta ?? {});
+        if (selection.success) this.applyDelta(selection.data, true);
         break;
       }
       case "delta": {
@@ -553,7 +556,9 @@ class DovoRuntime implements RuntimeClient {
           return;
         }
         this.sequence = Number(frame.sequence ?? this.sequence);
-        this.applyDelta(frame.delta as Record<string, unknown>, false);
+        const delta = SyncDeltaSchema.safeParse(frame.delta ?? {});
+        if (!delta.success) break; // a malformed delta is dropped; heartbeat resumes
+        this.applyDelta(delta.data, false);
         this.sink.publish({ type: "sync" });
         break;
       }
@@ -608,27 +613,19 @@ class DovoRuntime implements RuntimeClient {
     }
   }
 
-  private applyDelta(delta: Record<string, unknown>, fullReplace: boolean): void {
+  private applyDelta(delta: SyncDelta, fullReplace: boolean): void {
     const pendingNow = new Set<string>();
-    const state = delta.state as Record<string, unknown> | undefined;
-    if (state?.approvals) {
-      for (const approval of state.approvals as WireApproval[]) pendingNow.add(approval.taskId);
+    const state = delta.state;
+    for (const approval of state?.approvals ?? []) {
+      pendingNow.add(approval.taskId);
     }
-    const taskChanges = (
-      ((delta.workspace as Record<string, unknown> | undefined)?.tasks ?? {}) as Record<
-        string,
-        unknown
-      >
-    ).changes as
-      | {
-          id: string;
-          fields?: Record<string, unknown>;
-          fieldDelta?: { values?: Record<string, unknown>; removed?: string[] };
-          messages?: { changes?: { fields?: WireMessage & { text?: unknown }; text?: unknown }[] };
-        }[]
-      | undefined;
+    for (const question of state?.questions ?? []) {
+      pendingNow.add(question.taskId);
+      const fieldId = question.prompt.questions[0]?.id;
+      if (question.id && fieldId) this.questionFieldIds.set(question.id, fieldId);
+    }
 
-    for (const change of taskChanges ?? []) {
+    for (const change of delta.workspace?.tasks?.changes ?? []) {
       const taskId = change.id;
       const values = {
         ...(change.fields ?? {}),
@@ -651,7 +648,7 @@ class DovoRuntime implements RuntimeClient {
     }
 
     if (state?.approvals) {
-      for (const approval of state.approvals as WireApproval[]) {
+      for (const approval of state.approvals) {
         if (!this.emittedApprovals.has(approval.id)) {
           this.emittedApprovals.add(approval.id);
           this.emit({ type: "item.append", taskId: approval.taskId, item: approvalItem(approval) });
@@ -659,11 +656,8 @@ class DovoRuntime implements RuntimeClient {
       }
     }
     if (state?.questions) {
-      for (const question of state.questions as WireQuestion[]) {
+      for (const question of state.questions) {
         const key = `q:${question.id}`;
-        if (question.prompt.questions[0]?.id) {
-          this.questionFieldIds.set(question.id, question.prompt.questions[0].id);
-        }
         if (!this.emittedApprovals.has(key)) {
           this.emittedApprovals.add(key);
           this.emit({ type: "item.append", taskId: question.taskId, item: questionItem(question) });

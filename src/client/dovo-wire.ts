@@ -116,6 +116,31 @@ export const ActivityDeltaSchema = Loose({
 });
 export type ActivityDelta = z.infer<typeof ActivityDeltaSchema>;
 
+// Sync-channel payloads: snapshot/selection/delta frames, the consumed subset.
+const SyncTaskChangeSchema = Loose({
+  id: z.string(),
+  fields: z.record(z.string(), z.unknown()).optional(),
+  fieldDelta: Loose({
+    values: z.record(z.string(), z.unknown()).optional(),
+    removed: z.array(z.string()).optional(),
+  }).optional(),
+  messages: Loose({
+    changes: z
+      .array(Loose({ fields: WireMessageSchema.optional(), text: z.unknown().optional() }))
+      .optional(),
+  }).optional(),
+});
+export const SyncDeltaSchema = Loose({
+  state: Loose({
+    approvals: z.array(WireApprovalSchema).optional(),
+    questions: z.array(WireQuestionSchema).optional(),
+  }).optional(),
+  workspace: Loose({
+    tasks: Loose({ changes: z.array(SyncTaskChangeSchema).optional() }).optional(),
+  }).optional(),
+});
+export type SyncDelta = z.infer<typeof SyncDeltaSchema>;
+
 // The workspace PATCH verdict: a 200 can still mean "rejected".
 export const MutationOutcomeSchema = Loose({
   outcome: z.string().optional(),

@@ -34,7 +34,7 @@ usage: dovo [options]
        dovo serve [--port <n>] [backend options]   run only the local runtime server
        dovo orchestrate [port] [--worker <name> | --planner <profile>]   spread goals over the A2A workers
        dovo a2a-token [--rotate]       show (or replace) this worker's A2A access token
-       dovo doctor [backend options]   check every machine; exit 1 if anything fails
+       dovo doctor [--deep] [backend options]   check every machine; exit 1 if anything fails (--deep asks each expected agent a question: it spends model budget)
        dovo prune --older <30d|12h> [--yes] [backend options]   delete old archived tasks (dry run unless --yes)
        dovo add <name> <url> [--token <token>] [--ssh <user@host>] [--agent]   (ssh: managed tunnel; agent: it is an A2A worker)
        dovo token <token> [--profile <name>]
@@ -194,6 +194,7 @@ async function main(): Promise<void> {
       rotate: { type: "boolean" },
       agent: { type: "boolean" },
       planner: { type: "string" },
+      deep: { type: "boolean" },
       worker: { type: "string" },
       ssh: { type: "string" },
       help: { type: "boolean", short: "h" },

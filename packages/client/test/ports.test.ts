@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   parseCwd,
   parseListeners,
+  parseSs,
   projectContaining,
   type RunTool,
   scanPorts,
@@ -106,5 +107,51 @@ describe("scanPorts", () => {
     const ports = await scanPorts(projects, fakeTools());
 
     assert.ok(!ports.some((port) => port.port === 7777));
+  });
+});
+
+describe("without lsof (minimal Linux hosts)", () => {
+  const Ss = [
+    'LISTEN 0 511 127.0.0.1:3000 0.0.0.0:* users:(("node",pid=10,fd=23))',
+    'LISTEN 0 4096 0.0.0.0:8080 0.0.0.0:* users:(("api",pid=11,fd=7))',
+    'LISTEN 0 128 192.168.1.5:9000 0.0.0.0:* users:(("ext",pid=12,fd=4))',
+    "LISTEN 0 128 [::1]:5173 [::]:*",
+  ].join("\n");
+
+  it("reads ss output and keeps loopback and wildcard listeners that name their process", () => {
+    assert.deepEqual(parseSs(Ss), [
+      { pid: 10, command: "node", port: 3000 },
+      { pid: 11, command: "api", port: 8080 },
+    ]);
+  });
+
+  it("falls back to ss and /proc when lsof is not installed", async () => {
+    const missing = Object.assign(new Error("spawn lsof ENOENT"), { code: "ENOENT" });
+    const run: RunTool = (command, args) => {
+      if (command === "lsof") {
+        return Promise.reject(missing);
+      }
+      if (command === "ss") {
+        return Promise.resolve(Ss);
+      }
+      if (command === "readlink") {
+        return Promise.resolve(args[0] === "/proc/10/cwd" ? "/srv/web/app\n" : "/elsewhere\n");
+      }
+
+      return Promise.resolve("Mon Nov  3 10:00:00 2026\n");
+    };
+
+    const ports = await scanPorts(projects, run);
+
+    assert.deepEqual(
+      ports.map((port) => [port.port, port.projectId, port.command]),
+      [[3000, "web", "node"]],
+    );
+  });
+
+  it("still reports a real lsof failure instead of hiding it behind the fallback", async () => {
+    const run: RunTool = () => Promise.reject(Object.assign(new Error("boom"), { code: "EPERM" }));
+
+    await assert.rejects(scanPorts(projects, run), (error: Error) => error.message === "boom");
   });
 });

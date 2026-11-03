@@ -136,6 +136,23 @@ describe("worker hardening", () => {
     assert.match(replyText(refused), NOT_ALLOWED);
   });
 
+  it("refuses a request body far larger than any message", async () => {
+    const server = await start({});
+
+    const response = await fetch(`${server.url}/a2a/jsonrpc`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${server.token}` },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "SendMessage",
+        params: { pad: "x".repeat(2_000_000) },
+      }),
+    });
+
+    assert.equal(response.status, 413);
+  });
+
   it("refuses work when too many turns are already running", async () => {
     const server = await start({ maxActive: 0 });
 

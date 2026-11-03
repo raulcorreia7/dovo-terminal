@@ -34,7 +34,8 @@ export interface Listener {
   port: number;
 }
 
-const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "[::1]", "*", "localhost"]);
+// Listening on every interface includes loopback, so a wildcard counts.
+const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "[::1]", "*", "localhost", "0.0.0.0", "[::]"]);
 
 /** Parse `lsof -F pcn`: a `p` line starts a process, `c` names it, each `n` is a socket. */
 export function parseListeners(output: string): Listener[] {
@@ -59,6 +60,23 @@ export function parseListeners(output: string): Listener[] {
   return found;
 }
 
+const SS_LINE =
+  /\s(?<address>\S+):(?<port>\d+)\s+\S+\s+users:\(\("(?<command>[^"]+)",pid=(?<pid>\d+)/u;
+
+/** Parse `ss -ltnpH`, for Linux hosts without lsof: one line per listening socket. */
+export function parseSs(output: string): Listener[] {
+  return output.split("\n").flatMap((line) => {
+    const found = SS_LINE.exec(line)?.groups;
+    if (!(found && LOOPBACK_ADDRESSES.has(found["address"] ?? ""))) {
+      return [];
+    }
+
+    return [
+      { pid: Number(found["pid"]), command: found["command"] ?? "", port: Number(found["port"]) },
+    ];
+  });
+}
+
 /** The folder a process works in, from `lsof -d cwd -F n`. */
 export function parseCwd(output: string): string | undefined {
   return output
@@ -81,9 +99,13 @@ export function projectContaining(
   return inside.sort((a, b) => b.path.length - a.path.length)[0];
 }
 
-async function describe(pid: number, run: RunTool): Promise<{ folder?: string; started: string }> {
+async function describe(
+  pid: number,
+  run: RunTool,
+  viaLsof: boolean,
+): Promise<{ folder?: string; started: string }> {
   const [cwd, started] = await Promise.all([
-    run("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"]).catch(() => ""),
+    cwdOf(pid, run, viaLsof),
     run("ps", ["-o", "lstart=", "-p", String(pid)]).catch(() => ""),
   ]);
   const folder = parseCwd(cwd);
@@ -91,18 +113,42 @@ async function describe(pid: number, run: RunTool): Promise<{ folder?: string; s
   return { started: started.trim(), ...(folder && { folder }) };
 }
 
+/** A process's working folder: lsof anywhere, or the /proc link on Linux when lsof is absent. */
+async function cwdOf(pid: number, run: RunTool, viaLsof: boolean): Promise<string> {
+  if (viaLsof) {
+    return await run("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"]).catch(() => "");
+  }
+  const link = await run("readlink", [`/proc/${pid}/cwd`]).catch(() => "");
+
+  return link ? `n${link.trim()}` : "";
+}
+
+/** Listening sockets: from lsof if installed, else from ss (Linux). */
+async function listen(run: RunTool): Promise<{ listeners: Listener[]; viaLsof: boolean }> {
+  try {
+    return {
+      listeners: parseListeners(await run("lsof", ["-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcn"])),
+      viaLsof: true,
+    };
+  } catch (error) {
+    if ((error as { code?: unknown }).code !== "ENOENT") {
+      throw error;
+    }
+
+    return { listeners: parseSs(await run("ss", ["-ltnpH"])), viaLsof: false };
+  }
+}
+
 /** The services serving each project, one entry per listening port. */
 export async function scanPorts(
   projects: readonly Project[],
   run: RunTool = runTool,
 ): Promise<ServicePort[]> {
-  const listeners = parseListeners(
-    await run("lsof", ["-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcn"]),
-  );
+  const { listeners, viaLsof } = await listen(run);
   const details = new Map<number, Awaited<ReturnType<typeof describe>>>();
   await Promise.all(
     [...new Set(listeners.map((listener) => listener.pid))].map(async (pid) => {
-      details.set(pid, await describe(pid, run));
+      details.set(pid, await describe(pid, run, viaLsof));
     }),
   );
 

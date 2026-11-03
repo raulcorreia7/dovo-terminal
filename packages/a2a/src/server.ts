@@ -41,6 +41,8 @@ const CARD_PATH = "/.well-known/agent-card.json";
 const RPC_PATH = "/a2a/jsonrpc";
 const DEFAULT_HOSTNAME = "127.0.0.1";
 const TOKEN_BYTES = 24;
+/** A goal or message is text; a request far larger than this is a mistake or an attack. */
+const MAX_REQUEST_BYTES = 1_000_000;
 /** Time for the SDK to finish writing the turns we just ended, before the store closes. */
 const SETTLE_MS = 50;
 
@@ -149,6 +151,7 @@ export async function serveAgent(options: ServeOptions): Promise<RunningAgentSer
   app.use(
     RPC_PATH,
     requireToken(token),
+    express.json({ limit: MAX_REQUEST_BYTES }),
     jsonRpcHandler({ requestHandler: handler, userBuilder: UserBuilder.noAuthentication }),
   );
 

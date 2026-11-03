@@ -103,9 +103,9 @@ is in [docs/runbooks/unattended.md](docs/runbooks/unattended.md).
 ## Checking and cleaning up
 
 `m` in the terminal, or `dovo doctor` (exit 1 on a failure, for cron), checks each
-machine: reachable, expected agents present (`"expect": ["codex","opencode"]` in
+machine (add `--deep` to also ask each expected agent a one-line question, which spends model budget): reachable, expected agents present (`"expect": ["codex","opencode"]` in
 the config), tunnel up, A2A card reachable. `dovo prune --older 30d` lists archived
-tasks older than that; add `--yes` to delete them.
+tasks older than that; add `--yes` to delete them. Deleting is per machine: `--yes` with `--all` is refused, name one with `--profile`.
 
 ## GitHub
 

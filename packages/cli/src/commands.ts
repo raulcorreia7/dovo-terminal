@@ -9,6 +9,7 @@ import {
   type RuntimeProfile,
   saveConfig,
 } from "./config.ts";
+import { deepChecks } from "./deep.ts";
 import { plainReport, runChecks, targetsFor } from "./doctor.ts";
 import type { Options } from "./options.ts";
 import { parseAge, prune } from "./prune.ts";
@@ -18,7 +19,18 @@ import { assertSafeHost } from "./tunnel.ts";
 export async function runDoctor(values: Options): Promise<void> {
   const { client, machines } = await openBackend(values);
   try {
-    const report = plainReport(await runChecks(targetsFor(machines, loadConfig())));
+    const config = loadConfig();
+    const targets = targetsFor(machines, config);
+    const checks = await runChecks(targets);
+    if (values.deep) {
+      // asks each expected agent a question, which costs money: only when asked for
+      checks.push(
+        ...(await deepChecks(
+          machines.map((machine) => ({ ...machine, expect: config.expect ?? [] })),
+        )),
+      );
+    }
+    const report = plainReport(checks);
     process.stdout.write(`${report.text}\n`);
     process.exitCode = report.ok ? 0 : 1;
   } finally {
@@ -38,6 +50,11 @@ export function showA2aToken(values: Options): void {
 
 /** `dovo prune`: list archived tasks past the age; delete them only with --yes. */
 export async function runPrune(values: Options): Promise<void> {
+  if (values.all && values.yes) {
+    throw new Error(
+      "deleting across every machine at once is not allowed; name one with --profile <name>",
+    );
+  }
   if (!values.older) {
     throw new Error("usage: dovo prune --older <30d|12h> [--yes]");
   }

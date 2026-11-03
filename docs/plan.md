@@ -105,8 +105,9 @@ Known defects in what exists (confirmed by review, fixed in the named step):
 | File permissions                         | POSIX                                  | POSIX                                                | Same 0600 handling                                                                                                                     |
 | Config location                          | `~/.config`, honours `XDG_CONFIG_HOME` | `~/.config`                                          | One path on both (built); runtime discovery already checks macOS `Application Support`                                                 |
 
-Only Linux was available while writing this, so macOS behaviour is **unverified
-locally**. The CI macOS job is the check; the first macOS run is part of S0.
+The test suite passes on macOS in CI (Node 22.19, 22, 24). What that does not
+cover is `lsof`, `ssh` and the browser opener running on a real Mac against real
+processes and machines; that remains unverified.
 
 ## Ordered steps
 

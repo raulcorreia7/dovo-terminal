@@ -16,6 +16,7 @@ export interface Options {
   rotate?: boolean;
   agent?: boolean;
   planner?: string;
+  deep?: boolean;
   worker?: string;
   ssh?: string;
 }

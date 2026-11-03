@@ -2,9 +2,9 @@
 
 The local runtime server (`src/server/`) re-exposes any `RuntimeClient` on
 loopback: JSON over HTTP + one WebSocket channel. This is the client's only
-protocol; Dovo's own wire format never reaches the TUI. The upstream adapter
-(`src/client/dovo.ts`) is the single place that knows Dovo's shapes
-(`src/client/dovo-wire.ts`).
+protocol; Dovo's own wire format never reaches the TUI. The real Dovo client
+(`src/client/dovo.ts` and its `dovo-wire/-sync/-view/-read/-map` parts) is
+the single place that knows Dovo's shapes.
 
 Everything on the wire is validated with zod at both ends
 (`src/protocol/workspace.ts`, `src/protocol/sync.ts`). Frames:
@@ -12,7 +12,7 @@ Everything on the wire is validated with zod at both ends
 | frame                                | meaning                                |
 | ------------------------------------ | -------------------------------------- |
 | `{"type":"event","event":TaskEvent}` | transcript/status change for one task  |
-| `{"type":"connection","connected"}`  | upstream reachability (header dot)     |
+| `{"type":"connection","state":…}`    | runtime reachability (header dot)      |
 | `{"type":"sync"}`                    | a data delta landed; debounced refresh |
 
 `TaskEvent` kinds: `item.append`, `item.update`, `status`,
@@ -42,8 +42,8 @@ WS     /ws/sync                   SyncFrame stream
 
 Dovo's surface (audited in [dovo-api-contract.md](dovo-api-contract.md)) is
 mirrored where it is already good, and simplified where a third-party client
-benefits. The adapter absorbs every difference, so Dovo upstream changes touch
-one file (`dovo-wire.ts` + mapping), never the protocol or the TUI.
+benefits. The real client absorbs every difference, so Dovo upstream changes
+touch its `dovo-*` modules, never the protocol or the TUI.
 
 | local                       | Dovo counterpart                                               | deviation                                 |
 | --------------------------- | -------------------------------------------------------------- | ----------------------------------------- |
